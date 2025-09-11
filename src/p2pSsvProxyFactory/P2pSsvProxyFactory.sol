@@ -134,6 +134,10 @@ error P2pSsvProxyFactory__P2pSsvProxyDoesNotExist(
     address _feeDistributorInstance
 );
 
+/// @notice The caller was neither operator nor owner nor client
+/// @param _caller address of the caller
+error P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient(address _caller);
+
 /// @title Entry point for SSV validator registration
 /// @dev Deploys P2pSsvProxy instances
 contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC165, IP2pSsvProxyFactory {
@@ -287,6 +291,19 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
             }
         }
 
+        _;
+    }
+
+    /// @notice If caller is neither operator nor owner nor client, revert
+    modifier onlyOperatorOrOwnerOrClient(address _client) {
+        if (_client != msg.sender) {
+            address operator_ = operator();
+            address owner_ = owner();
+
+            if (operator_ != msg.sender && owner_ != msg.sender) {
+                revert P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient(msg.sender);
+            }
+        }
         _;
     }
 
@@ -651,7 +668,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         SsvPayload calldata _ssvPayload,
         FeeRecipient calldata _clientConfig,
         FeeRecipient calldata _referrerConfig
-    ) external payable returns (address p2pSsvProxy) {
+    ) external payable onlyOperatorOrOwnerOrClient(_clientConfig.recipient) returns (address p2pSsvProxy) {
         _checkEthValue(_ssvPayload.tokenAmount);
 
         p2pSsvProxy = _registerValidators(_ssvPayload, _clientConfig, _referrerConfig);
@@ -668,7 +685,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         FeeRecipient calldata _clientConfig,
         FeeRecipient calldata _referrerConfig
-    ) external payable returns (address p2pSsvProxy) {
+    ) external payable onlyOperatorOrOwnerOrClient(_clientConfig.recipient) returns (address p2pSsvProxy) {
         _checkEthValue(_amount);
 
         p2pSsvProxy = _registerValidators(
