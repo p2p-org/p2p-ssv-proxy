@@ -294,9 +294,22 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         _;
     }
 
-    /// @notice If caller is neither operator nor owner nor client, revert
-    modifier onlyOperatorOrOwnerOrClient(address _client) {
-        if (_client != msg.sender) {
+    /// @notice If caller is neither operator nor owner nor client, nor _referrer, revert
+    modifier onlyOperatorOrOwnerOrClientOrReferrer(address _client, address _referrer) {
+        if (_client != msg.sender && _referrer != msg.sender) {
+            address operator_ = operator();
+            address owner_ = owner();
+
+            if (operator_ != msg.sender && owner_ != msg.sender) {
+                revert P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient(msg.sender);
+            }
+        }
+        _;
+    }
+
+    /// @notice If caller is neither operator nor owner nor client, nor _referrer, nor WC address, revert
+    modifier onlyOperatorOrOwnerOrClientOrReferrerOrWcAddress(address _client, address _referrer, address _wcAddress) {
+        if (_client != msg.sender && _referrer != msg.sender && _wcAddress != msg.sender) {
             address operator_ = operator();
             address owner_ = owner();
 
@@ -591,7 +604,15 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         FeeRecipient calldata _clientConfig,
         FeeRecipient calldata _referrerConfig
-    ) external payable returns (address p2pSsvProxy) {
+    )
+    external
+    payable
+    onlyOperatorOrOwnerOrClientOrReferrerOrWcAddress(
+        _clientConfig.recipient,
+        _referrerConfig.recipient,
+        _withdrawalCredentialsAddress
+    )
+    returns (address p2pSsvProxy) {
         _checkTokenAmount(_ssvPayload.tokenAmount, _ssvPayload.ssvValidators.length);
 
         _makeBeaconDeposits(_depositData, _withdrawalCredentialsAddress, _ssvPayload.ssvValidators);
@@ -613,7 +634,15 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         FeeRecipient calldata _clientConfig,
         FeeRecipient calldata _referrerConfig
-    ) external payable returns (address p2pSsvProxy) {
+    )
+    external
+    payable
+    onlyOperatorOrOwnerOrClientOrReferrerOrWcAddress(
+        _clientConfig.recipient,
+        _referrerConfig.recipient,
+        _withdrawalCredentialsAddress
+    )
+    returns (address p2pSsvProxy) {
         _checkTokenAmount(_amount, _publicKeys.length);
 
         _makeBeaconDeposits(_depositData, _withdrawalCredentialsAddress, _publicKeys);
@@ -668,7 +697,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         SsvPayload calldata _ssvPayload,
         FeeRecipient calldata _clientConfig,
         FeeRecipient calldata _referrerConfig
-    ) external payable onlyOperatorOrOwnerOrClient(_clientConfig.recipient) returns (address p2pSsvProxy) {
+    ) external payable onlyOperatorOrOwnerOrClientOrReferrer(_clientConfig.recipient, _referrerConfig.recipient) returns (address p2pSsvProxy) {
         _checkEthValue(_ssvPayload.tokenAmount);
 
         p2pSsvProxy = _registerValidators(_ssvPayload, _clientConfig, _referrerConfig);
@@ -685,7 +714,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         FeeRecipient calldata _clientConfig,
         FeeRecipient calldata _referrerConfig
-    ) external payable onlyOperatorOrOwnerOrClient(_clientConfig.recipient) returns (address p2pSsvProxy) {
+    ) external payable onlyOperatorOrOwnerOrClientOrReferrer(_clientConfig.recipient, _referrerConfig.recipient) returns (address p2pSsvProxy) {
         _checkEthValue(_amount);
 
         p2pSsvProxy = _registerValidators(
