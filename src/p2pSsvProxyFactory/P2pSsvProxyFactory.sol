@@ -307,19 +307,6 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         _;
     }
 
-    /// @notice If caller is neither operator nor owner nor client, nor _referrer, nor WC address, revert
-    modifier onlyOperatorOrOwnerOrClientOrReferrerOrWcAddress(address _client, address _referrer, address _wcAddress) {
-        if (_client != msg.sender && _referrer != msg.sender && _wcAddress != msg.sender) {
-            address operator_ = operator();
-            address owner_ = owner();
-
-            if (operator_ != msg.sender && owner_ != msg.sender) {
-                revert P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient(msg.sender);
-            }
-        }
-        _;
-    }
-
     /// @dev Set values that are constant, common for all clients, known at the initial deploy time.
     /// @param _p2pOrgUnlimitedEthDepositor P2pOrgUnlimitedEthDepositor address
     /// @param _feeDistributorFactory FeeDistributorFactory address
@@ -607,10 +594,9 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     )
     external
     payable
-    onlyOperatorOrOwnerOrClientOrReferrerOrWcAddress(
+    onlyOperatorOrOwnerOrClientOrReferrer(
         _clientConfig.recipient,
-        _referrerConfig.recipient,
-        _withdrawalCredentialsAddress
+        _referrerConfig.recipient
     )
     returns (address p2pSsvProxy) {
         _checkTokenAmount(_ssvPayload.tokenAmount, _ssvPayload.ssvValidators.length);
@@ -637,10 +623,9 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     )
     external
     payable
-    onlyOperatorOrOwnerOrClientOrReferrerOrWcAddress(
+    onlyOperatorOrOwnerOrClientOrReferrer(
         _clientConfig.recipient,
-        _referrerConfig.recipient,
-        _withdrawalCredentialsAddress
+        _referrerConfig.recipient
     )
     returns (address p2pSsvProxy) {
         _checkTokenAmount(_amount, _publicKeys.length);
@@ -697,7 +682,14 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         SsvPayload calldata _ssvPayload,
         FeeRecipient calldata _clientConfig,
         FeeRecipient calldata _referrerConfig
-    ) external payable onlyOperatorOrOwnerOrClientOrReferrer(_clientConfig.recipient, _referrerConfig.recipient) returns (address p2pSsvProxy) {
+    )
+    external
+    payable
+    onlyOperatorOrOwnerOrClientOrReferrer(
+        _clientConfig.recipient,
+        _referrerConfig.recipient
+    )
+    returns (address p2pSsvProxy) {
         _checkEthValue(_ssvPayload.tokenAmount);
 
         p2pSsvProxy = _registerValidators(_ssvPayload, _clientConfig, _referrerConfig);
@@ -714,7 +706,14 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         FeeRecipient calldata _clientConfig,
         FeeRecipient calldata _referrerConfig
-    ) external payable onlyOperatorOrOwnerOrClientOrReferrer(_clientConfig.recipient, _referrerConfig.recipient) returns (address p2pSsvProxy) {
+    )
+    external
+    payable
+    onlyOperatorOrOwnerOrClientOrReferrer(
+        _clientConfig.recipient,
+        _referrerConfig.recipient
+    )
+    returns (address p2pSsvProxy) {
         _checkEthValue(_amount);
 
         p2pSsvProxy = _registerValidators(
