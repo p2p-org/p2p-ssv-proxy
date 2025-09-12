@@ -584,17 +584,25 @@ contract MainnetIntegration is Test {
 
         SsvPayload memory ssvPayload1 = getSsvPayload1();
 
-        vm.deal(client, 1000 ether);
-        vm.startPrank(client);
-
         uint256 neededEth = p2pSsvProxyFactory.getNeededAmountOfEtherToCoverSsvFees(ssvPayload1.tokenAmount);
 
+        vm.deal(nobody, 1000 ether);
+        vm.startPrank(nobody);
+        vm.expectRevert(abi.encodeWithSelector(P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient.selector, nobody));
         p2pSsvProxyFactory.registerValidators{value: neededEth}(
             ssvPayload1,
             clientConfig,
             referrerConfig
         );
+        vm.stopPrank();
 
+        vm.deal(client, 1000 ether);
+        vm.startPrank(client);
+        p2pSsvProxyFactory.registerValidators{value: neededEth}(
+            ssvPayload1,
+            clientConfig,
+            referrerConfig
+        );
         vm.stopPrank();
     }
 
@@ -1455,6 +1463,24 @@ contract MainnetIntegration is Test {
         uint256 amount = 1.6e18;
 
         uint256 neededEth = p2pSsvProxyFactory.getNeededAmountOfEtherToCoverSsvFees(amount);
+
+        vm.deal(nobody, 1000 ether);
+        vm.startPrank(nobody);
+
+        vm.expectRevert(abi.encodeWithSelector(P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient.selector, nobody));
+        p2pSsvProxyFactory.registerValidators{value: neededEth}(
+            allowedSsvOperatorOwners,
+            operatorIds,
+            pubKeys1,
+            sharesData1,
+            amount,
+            getCluster1(),
+
+            clientConfig,
+            referrerConfig
+        );
+
+        vm.stopPrank();
 
         vm.deal(client, 1000 ether);
         vm.startPrank(client);
