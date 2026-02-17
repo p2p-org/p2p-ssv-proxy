@@ -12,6 +12,7 @@ import "../interfaces/p2p/IFeeDistributor.sol";
 import "../interfaces/p2p/IFeeDistributorFactory.sol";
 import "../interfaces/p2p/IP2pOrgUnlimitedEthDepositor.sol";
 import "../interfaces/ssv/ISSVViews.sol";
+import "../interfaces/ssv/ISSVNetworkEth.sol";
 
 import "../assetRecovering/OwnableAssetRecoverer.sol";
 import "../access/OwnableWithOperator.sol";
@@ -137,6 +138,15 @@ error P2pSsvProxyFactory__P2pSsvProxyDoesNotExist(
 /// @notice The caller was neither operator nor owner nor client
 /// @param _caller address of the caller
 error P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient(address _caller);
+
+/// @notice msg.value does not equal beacon collateral plus SSV ETH funding
+/// @param _expected expected msg.value
+/// @param _actual actual msg.value
+error P2pSsvProxyFactory__InvalidEthValue(uint256 _expected, uint256 _actual);
+
+/// @notice The given address is not a deployed P2pSsvProxy
+/// @param _address the address that is not a deployed P2pSsvProxy
+error P2pSsvProxyFactory__NotDeployedP2pSsvProxy(address _address);
 
 /// @title Entry point for SSV validator registration
 /// @dev Deploys P2pSsvProxy instances
@@ -352,6 +362,9 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         i_ssvToken.approve(address(i_ssvNetwork), type(uint256).max);
     }
 
+    /// @notice Accept ETH from proxies (e.g. withdrawEthToFactory)
+    receive() external payable {}
+
     /// @inheritdoc IP2pSsvProxyFactory
     function setSsvPerEthExchangeRateDividedByWei(uint112 _ssvPerEthExchangeRateDividedByWei) external onlyOwner {
         if (_ssvPerEthExchangeRateDividedByWei < 10 ** 12 || _ssvPerEthExchangeRateDividedByWei > 10 ** 20) {
@@ -378,7 +391,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
             revert P2pSsvProxyFactory__NotP2pSsvProxy(_referenceP2pSsvProxy);
         }
 
-        s_referenceP2pSsvProxy = P2pSsvProxy(_referenceP2pSsvProxy);
+        s_referenceP2pSsvProxy = P2pSsvProxy(payable(_referenceP2pSsvProxy));
         emit P2pSsvProxyFactory__ReferenceP2pSsvProxySet(_referenceP2pSsvProxy);
     }
 
@@ -762,7 +775,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         i_ssvToken.transfer(address(p2pSsvProxy), _amount);
 
-        P2pSsvProxy(p2pSsvProxy).bulkRegisterValidators(
+        P2pSsvProxy(payable(p2pSsvProxy)).bulkRegisterValidators(
             _publicKeys,
             _operatorIds,
             _sharesData,
@@ -781,6 +794,148 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         ISSVNetwork.Cluster calldata _cluster
     ) external onlyOwner {
         i_ssvNetwork.deposit(_clusterOwner, _operatorIds, _tokenAmount, _cluster);
+    }
+
+    /**********************************/
+    /* ETH-Native Methods (V2)        */
+    /**********************************/
+
+    /// @inheritdoc IP2pSsvProxyFactory
+    function registerValidatorsEth(
+        address[] calldata _operatorOwners,
+        uint64[] calldata _operatorIds,
+        bytes[] calldata _publicKeys,
+        bytes[] calldata _sharesData,
+        ISSVNetwork.Cluster calldata _cluster,
+
+        FeeRecipient calldata _clientConfig,
+        FeeRecipient calldata _referrerConfig
+    )
+    external
+    payable
+    onlyOperatorOrOwnerOrClientOrReferrer(
+        _clientConfig.recipient,
+        _referrerConfig.recipient
+    )
+    onlyAllowedOperatorsByOwner(_operatorOwners, _operatorIds)
+    returns (address p2pSsvProxy) {
+        address feeDistributorInstance = _createFeeDistributor(_clientConfig, _referrerConfig);
+        p2pSsvProxy = _createP2pSsvProxy(feeDistributorInstance);
+
+        P2pSsvProxy(payable(p2pSsvProxy)).bulkRegisterValidatorsEth{value: msg.value}(
+            _publicKeys,
+            _operatorIds,
+            _sharesData,
+            _cluster
+        );
+
+        emit P2pSsvProxyFactory__EthRegistrationCompleted(p2pSsvProxy, msg.value);
+    }
+
+    /// @inheritdoc IP2pSsvProxyFactory
+    function depositEthAndRegisterValidatorsEth(
+        DepositData calldata _depositData,
+        address _withdrawalCredentialsAddress,
+
+        address[] calldata _operatorOwners,
+        uint64[] calldata _operatorIds,
+        bytes[] calldata _publicKeys,
+        bytes[] calldata _sharesData,
+        ISSVNetwork.Cluster calldata _cluster,
+
+        FeeRecipient calldata _clientConfig,
+        FeeRecipient calldata _referrerConfig,
+        uint256 _ssvEthAmount
+    )
+    external
+    payable
+    onlyOperatorOrOwnerOrClientOrReferrer(
+        _clientConfig.recipient,
+        _referrerConfig.recipient
+    )
+    onlyAllowedOperatorsByOwner(_operatorOwners, _operatorIds)
+    returns (address p2pSsvProxy) {
+        uint256 beaconCollateral = COLLATERAL * _publicKeys.length;
+        if (msg.value != beaconCollateral + _ssvEthAmount) {
+            revert P2pSsvProxyFactory__InvalidEthValue(beaconCollateral + _ssvEthAmount, msg.value);
+        }
+
+        _makeBeaconDepositsEth(_depositData, _withdrawalCredentialsAddress, _publicKeys);
+
+        address feeDistributorInstance = _createFeeDistributor(_clientConfig, _referrerConfig);
+        p2pSsvProxy = _createP2pSsvProxy(feeDistributorInstance);
+
+        P2pSsvProxy(payable(p2pSsvProxy)).bulkRegisterValidatorsEth{value: _ssvEthAmount}(
+            _publicKeys,
+            _operatorIds,
+            _sharesData,
+            _cluster
+        );
+
+        emit P2pSsvProxyFactory__EthRegistrationCompleted(p2pSsvProxy, _ssvEthAmount);
+    }
+
+    /// @inheritdoc IP2pSsvProxyFactory
+    function depositToSsvEth(
+        address _clusterOwner,
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster calldata _cluster
+    ) external payable onlyOwner {
+        ISSVNetworkEth(address(i_ssvNetwork)).deposit{value: msg.value}(_clusterOwner, _operatorIds, _cluster);
+    }
+
+    /// @inheritdoc IP2pSsvProxyFactory
+    function migrateClusterToETH(
+        address _p2pSsvProxy,
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster calldata _cluster
+    ) external payable onlyOperatorOrOwner {
+        if (!s_deployedP2pSsvProxies[_p2pSsvProxy]) {
+            revert P2pSsvProxyFactory__NotDeployedP2pSsvProxy(_p2pSsvProxy);
+        }
+
+        P2pSsvProxy(payable(_p2pSsvProxy)).migrateClusterToETH{value: msg.value}(
+            _operatorIds,
+            _cluster
+        );
+
+        emit P2pSsvProxyFactory__ClusterMigrationInitiated(_p2pSsvProxy, msg.value);
+    }
+
+    /// @notice Make ETH2 (Beacon) deposits for ETH-native registration path
+    /// @dev Variant of _makeBeaconDeposits that does not require msg.value == COLLATERAL * count,
+    /// since msg.value includes additional ETH for SSV cluster funding.
+    /// @param _depositData signatures and depositDataRoots from Beacon deposit data
+    /// @param _withdrawalCredentialsAddress address for 0x01 withdrawal credentials
+    /// @param _pubkeys list of pubkeys
+    function _makeBeaconDepositsEth(
+        DepositData calldata _depositData,
+        address _withdrawalCredentialsAddress,
+        bytes[] calldata _pubkeys
+    ) private {
+        uint256 validatorCount = _pubkeys.length;
+
+        if (_depositData.signatures.length != validatorCount || _depositData.depositDataRoots.length != validatorCount) {
+            revert P2pSsvProxyFactory__DepositDataArraysShouldHaveTheSameLength(
+                validatorCount,
+                _depositData.signatures.length,
+                _depositData.depositDataRoots.length
+            );
+        }
+
+        bytes memory withdrawalCredentials = abi.encodePacked(
+            hex'010000000000000000000000',
+            _withdrawalCredentialsAddress
+        );
+
+        for (uint256 i = 0; i < validatorCount; ++i) {
+            i_depositContract.deposit{value: COLLATERAL}(
+                _pubkeys[i],
+                withdrawalCredentials,
+                _depositData.signatures[i],
+                _depositData.depositDataRoots[i]
+            );
+        }
     }
 
     function _checkTokenAmount(
@@ -814,7 +969,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         i_ssvToken.transfer(address(p2pSsvProxy), _ssvPayload.tokenAmount);
 
-        P2pSsvProxy(p2pSsvProxy).registerValidators(_ssvPayload);
+        P2pSsvProxy(payable(p2pSsvProxy)).registerValidators(_ssvPayload);
 
         emit P2pSsvProxyFactory__RegistrationCompleted(p2pSsvProxy);
     }
@@ -848,7 +1003,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         i_ssvToken.transfer(address(p2pSsvProxy), _amount);
 
-        P2pSsvProxy(p2pSsvProxy).bulkRegisterValidators(
+        P2pSsvProxy(payable(p2pSsvProxy)).bulkRegisterValidators(
             _publicKeys,
             _operatorIds,
             _sharesData,
@@ -878,7 +1033,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
             );
 
             // set the client address to the cloned P2pSsvProxy instance
-            P2pSsvProxy(p2pSsvProxyInstance).initialize(_feeDistributorInstance);
+            P2pSsvProxy(payable(p2pSsvProxyInstance)).initialize(_feeDistributorInstance);
 
             address client = IFeeDistributor(_feeDistributorInstance).client();
 
@@ -1134,9 +1289,13 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         return s_deployedP2pSsvProxies[account];
     }
 
+    /// @dev V1 interfaceId before ETH-native methods were added. Kept for backward compatibility.
+    bytes4 private constant _IP2P_SSV_PROXY_FACTORY_V1_INTERFACE_ID = 0x6b9e0f51;
+
     /// @inheritdoc ERC165
     function supportsInterface(bytes4 interfaceId) public view virtual override(ERC165, IERC165) returns (bool) {
         return interfaceId == type(IP2pSsvProxyFactory).interfaceId ||
+               interfaceId == _IP2P_SSV_PROXY_FACTORY_V1_INTERFACE_ID ||
                interfaceId == type(ISSVWhitelistingContract).interfaceId ||
                super.supportsInterface(interfaceId);
     }

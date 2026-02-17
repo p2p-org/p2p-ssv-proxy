@@ -9,6 +9,7 @@ import "../@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import "../constants/P2pConstants.sol";
 import "../interfaces/ssv/ISSVNetwork.sol";
+import "../interfaces/ssv/ISSVNetworkEth.sol";
 import "../interfaces/IDepositContract.sol";
 import "../interfaces/p2p/IFeeDistributorFactory.sol";
 import "../access/OwnableWithOperator.sol";
@@ -53,6 +54,11 @@ error P2pSsvProxy__AmountOfParametersError();
 /// @param _caller caller address
 /// @param _selector function selector to be called on SSVNetwork
 error P2pSsvProxy__SelectorNotAllowed(address _caller, bytes4 _selector);
+
+/// @notice ETH transfer failed
+/// @param _recipient address that was supposed to receive ETH
+/// @param _amount amount of ETH that failed to transfer
+error P2pSsvProxy__EthTransferFailed(address _recipient, uint256 _amount);
 
 /// @title Proxy for SSVNetwork calls.
 /// @dev Each instance of P2pSsvProxy corresponds to 1 FeeDistributor instance.
@@ -145,9 +151,14 @@ contract P2pSsvProxy is OwnableAssetRecoverer, ERC165, IP2pSsvProxy {
         emit P2pSsvProxy__Initialized(_feeDistributor);
     }
 
+    /// @notice Accept ETH sent from SSV network operations (e.g. ETH-cluster withdraw/liquidate return path)
+    receive() external payable {
+        emit P2pSsvProxy__EthReceived(msg.sender, msg.value);
+    }
+
     /// @dev Access any SSVNetwork function as cluster owner (this P2pSsvProxy instance)
     /// Each selector access is managed by P2pSsvProxyFactory roles (owner, operator, client)
-    fallback() external {
+    fallback() external payable {
         address caller = msg.sender;
         bytes4 selector = msg.sig;
 
@@ -159,7 +170,7 @@ contract P2pSsvProxy is OwnableAssetRecoverer, ERC165, IP2pSsvProxy {
             revert P2pSsvProxy__SelectorNotAllowed(caller, selector);
         }
 
-        (bool success, bytes memory data) = address(i_ssvNetwork).call(msg.data);
+        (bool success, bytes memory data) = address(i_ssvNetwork).call{value: msg.value}(msg.data);
         if (success) {
             emit P2pSsvProxy__SuccessfullyCalledViaFallback(caller, selector);
 
@@ -354,6 +365,101 @@ contract P2pSsvProxy is OwnableAssetRecoverer, ERC165, IP2pSsvProxy {
         i_ssvNetwork.bulkExitValidator(publicKeys, operatorIds);
     }
 
+    /**********************************/
+    /* ETH-Native Methods (V2)        */
+    /**********************************/
+
+    /// @inheritdoc IP2pSsvProxy
+    function bulkRegisterValidatorsEth(
+        bytes[] calldata publicKeys,
+        uint64[] calldata operatorIds,
+        bytes[] calldata sharesData,
+        ISSVNetwork.Cluster calldata cluster
+    ) external payable onlyP2pSsvProxyFactory {
+        ISSVNetworkEth(address(i_ssvNetwork)).bulkRegisterValidator{value: msg.value}(
+            publicKeys,
+            operatorIds,
+            sharesData,
+            cluster
+        );
+        ISSVNetworkEth(address(i_ssvNetwork)).setFeeRecipientAddress(address(s_feeDistributor));
+    }
+
+    /// @inheritdoc IP2pSsvProxy
+    function depositToSsvEth(
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster[] calldata _clusters
+    ) external payable {
+        address clusterOwner = address(this);
+        uint256 clusterCount = _clusters.length;
+        if (clusterCount == 0) {
+            revert P2pSsvProxy__AmountOfParametersError();
+        }
+        uint256 perCluster = msg.value / clusterCount;
+        uint256 lastIndex = clusterCount - 1;
+
+        for (uint256 i = 0; i < clusterCount;) {
+            uint256 value = (i == lastIndex)
+                ? msg.value - perCluster * lastIndex
+                : perCluster;
+
+            ISSVNetworkEth(address(i_ssvNetwork)).deposit{value: value}(
+                clusterOwner,
+                _operatorIds,
+                _clusters[i]
+            );
+
+            unchecked { ++i; }
+        }
+    }
+
+    /// @inheritdoc IP2pSsvProxy
+    function reactivateEth(
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster[] calldata _clusters
+    ) external payable onlyOperatorOrOwner {
+        uint256 clusterCount = _clusters.length;
+        if (clusterCount == 0) {
+            revert P2pSsvProxy__AmountOfParametersError();
+        }
+        uint256 perCluster = msg.value / clusterCount;
+        uint256 lastIndex = clusterCount - 1;
+
+        for (uint256 i = 0; i < clusterCount;) {
+            uint256 value = (i == lastIndex)
+                ? msg.value - perCluster * lastIndex
+                : perCluster;
+
+            ISSVNetworkEth(address(i_ssvNetwork)).reactivate{value: value}(
+                _operatorIds,
+                _clusters[i]
+            );
+
+            unchecked { ++i; }
+        }
+    }
+
+    /// @inheritdoc IP2pSsvProxy
+    function migrateClusterToETH(
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster calldata _cluster
+    ) external payable onlyOperatorOrOwner {
+        ISSVNetworkEth(address(i_ssvNetwork)).migrateClusterToETH{value: msg.value}(
+            _operatorIds,
+            _cluster
+        );
+    }
+
+    // TODO: Discuss if this convenience method is needed or if inherited transferEther() is sufficient
+    /// @inheritdoc IP2pSsvProxy
+    function withdrawEthToFactory() external onlyOperatorOrOwner {
+        uint256 balance = address(this).balance;
+        (bool success, ) = address(i_p2pSsvProxyFactory).call{value: balance}("");
+        if (!success) {
+            revert P2pSsvProxy__EthTransferFailed(address(i_p2pSsvProxyFactory), balance);
+        }
+    }
+
     /// @notice Extract operatorIds and clusterIndex out of SsvOperator list
     /// @param _ssvOperators list of SSV operator data
     /// @return operatorIds list of SSV operator IDs, clusterIndex updated cluster index
@@ -461,8 +567,13 @@ contract P2pSsvProxy is OwnableAssetRecoverer, ERC165, IP2pSsvProxy {
         return address(s_feeDistributor);
     }
 
+    /// @dev V1 interfaceId before ETH-native methods were added. Kept for backward compatibility.
+    bytes4 private constant _IP2P_SSV_PROXY_V1_INTERFACE_ID = 0xf575c147;
+
     /// @inheritdoc ERC165
     function supportsInterface(bytes4 interfaceId) public view virtual override(ERC165, IERC165) returns (bool) {
-        return interfaceId == type(IP2pSsvProxy).interfaceId || super.supportsInterface(interfaceId);
+        return interfaceId == type(IP2pSsvProxy).interfaceId ||
+               interfaceId == _IP2P_SSV_PROXY_V1_INTERFACE_ID ||
+               super.supportsInterface(interfaceId);
     }
 }
