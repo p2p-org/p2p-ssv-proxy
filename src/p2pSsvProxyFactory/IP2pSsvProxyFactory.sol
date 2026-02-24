@@ -232,13 +232,7 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
         address _feeDistributorInstance
     ) external returns(address p2pSsvProxyInstance);
 
-    /// @notice Batch deposit ETH and register validators with SSV (up to 50, calldata size is the limit)
-    /// @param _depositData signatures and depositDataRoots from Beacon deposit data
-    /// @param _withdrawalCredentialsAddress address for 0x01 withdrawal credentials from Beacon deposit data (1 for the batch)
-    /// @param _ssvPayload a stuct with data necessary for SSV registration (see `SsvPayload` struct for details)
-    /// @param _clientConfig address and basis points (percent * 100) of the client (for FeeDistributor)
-    /// @param _referrerConfig address and basis points (percent * 100) of the referrer (for FeeDistributor)
-    /// @return p2pSsvProxy client P2pSsvProxy instance that became the SSV cluster owner
+    /// @notice DEPRECATED. Always reverts. Use registerValidatorsEth for ETH-native registration.
     function depositEthAndRegisterValidators(
         DepositData calldata _depositData,
         address _withdrawalCredentialsAddress,
@@ -249,18 +243,7 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
         FeeRecipient calldata _referrerConfig
     ) external payable returns (address p2pSsvProxy);
 
-    /// @notice Batch deposit ETH and register validators with SSV (up to 50, calldata size is the limit)
-    /// @param _depositData signatures and depositDataRoots from Beacon deposit data
-    /// @param _withdrawalCredentialsAddress address for 0x01 withdrawal credentials from Beacon deposit data (1 for the batch)
-    /// @param _operatorOwners SSV operator owner addresses
-    /// @param _operatorIds SSV operator IDs
-    /// @param _publicKeys validator public keys
-    /// @param _sharesData encrypted shares related to the validator
-    /// @param _amount amount of ERC-20 SSV tokens to deposit into the cluster
-    /// @param _cluster SSV cluster
-    /// @param _clientConfig address and basis points (percent * 100) of the client (for FeeDistributor)
-    /// @param _referrerConfig address and basis points (percent * 100) of the referrer (for FeeDistributor)
-    /// @return p2pSsvProxy client P2pSsvProxy instance that became the SSV cluster owner
+    /// @notice DEPRECATED. Always reverts. Use registerValidatorsEth for ETH-native registration.
     function depositEthAndRegisterValidators(
         DepositData calldata _depositData,
         address _withdrawalCredentialsAddress,
@@ -370,6 +353,94 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
         uint64[] calldata _operatorIds,
         ISSVNetwork.Cluster calldata _cluster
     ) external;
+
+    /**********************************/
+    /* ETH-Native Methods (V2)        */
+    /**********************************/
+
+    /// @notice Emits when ETH-native batch registration of validators with SSV is completed
+    /// @param _proxy address of P2pSsvProxy used for registration
+    /// @param _ethToSsv amount of ETH forwarded to SSV for cluster funding
+    event P2pSsvProxyFactory__EthRegistrationCompleted(
+        address indexed _proxy,
+        uint256 _ethToSsv
+    );
+
+    /// @notice Emits when a cluster migration to ETH has been initiated via the factory
+    /// @param _proxy address of P2pSsvProxy whose cluster is being migrated
+    /// @param _ethDeposited amount of ETH deposited for the migrated cluster
+    event P2pSsvProxyFactory__ClusterMigrationInitiated(
+        address indexed _proxy,
+        uint256 _ethDeposited
+    );
+
+    /// @notice Register validators with SSV using ETH payments (no beacon deposit)
+    /// @dev msg.value is forwarded to SSV as cluster funding. No SSV token transfer.
+    /// @param _operatorOwners SSV operator owner addresses
+    /// @param _operatorIds SSV operator IDs
+    /// @param _publicKeys validator public keys
+    /// @param _sharesData encrypted shares related to the validators
+    /// @param _cluster SSV cluster
+    /// @param _clientConfig address and basis points (percent * 100) of the client (for FeeDistributor)
+    /// @param _referrerConfig address and basis points (percent * 100) of the referrer (for FeeDistributor)
+    /// @return p2pSsvProxy client P2pSsvProxy instance that became the SSV cluster owner
+    function registerValidatorsEth(
+        address[] calldata _operatorOwners,
+        uint64[] calldata _operatorIds,
+        bytes[] calldata _publicKeys,
+        bytes[] calldata _sharesData,
+        ISSVNetwork.Cluster calldata _cluster,
+
+        FeeRecipient calldata _clientConfig,
+        FeeRecipient calldata _referrerConfig
+    ) external payable returns (address p2pSsvProxy);
+
+    /// @notice Deposit ETH from P2pSsvProxyFactory directly to an SSV cluster
+    /// @dev msg.value is forwarded to SSV as the deposit amount
+    /// @param _clusterOwner SSV cluster owner (usually, P2pSsvProxy instance)
+    /// @param _operatorIds SSV operator IDs
+    /// @param _cluster SSV cluster
+    function depositToSsvEth(
+        address _clusterOwner,
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster calldata _cluster
+    ) external payable;
+
+    /// @notice Initiate migration of a P2pSsvProxy cluster from SSV to ETH payments
+    /// @dev msg.value is forwarded as the ETH deposit for the migrated cluster.
+    /// SSV tokens refunded by SSV remain in the proxy and should be swept separately.
+    /// @param _p2pSsvProxy address of the P2pSsvProxy whose cluster is being migrated
+    /// @param _operatorIds SSV operator IDs
+    /// @param _cluster SSV cluster to migrate
+    function migrateClusterToETH(
+        address _p2pSsvProxy,
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster calldata _cluster
+    ) external payable;
+
+    /**********************************/
+    /* Beacon Proxy Management        */
+    /**********************************/
+
+    /// @notice Emits when the beacon address for new proxy deployments is set
+    /// @param _beacon the new beacon address
+    event P2pSsvProxyFactory__BeaconSet(address indexed _beacon);
+
+    /// @notice Set the UpgradeableBeacon address for new proxy deployments
+    /// @dev When set, new proxies are deployed as BeaconProxy instances. When unset, clone path is used.
+    /// @param _beacon The UpgradeableBeacon address (its implementation must support IP2pSsvProxy)
+    function setBeacon(address _beacon) external;
+
+    /// @notice Returns the current beacon address (zero if not set)
+    /// @return beacon address
+    function getBeacon() external view returns (address);
+
+    /// @notice Predict the address of a BeaconProxy-based P2pSsvProxy instance
+    /// @param _feeDistributorInstance The address of FeeDistributor instance
+    /// @return address the predicted proxy address
+    function predictP2pSsvProxyAddressBeacon(
+        address _feeDistributorInstance
+    ) external view returns (address);
 
     /// @notice Returns the FeeDistributorFactory address
     /// @return FeeDistributorFactory address

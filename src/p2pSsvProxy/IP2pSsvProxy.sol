@@ -169,6 +169,76 @@ interface IP2pSsvProxy is IOwnableWithOperator, IERC165 {
     /// @param operatorIds Array of IDs of operators managing the validators
     function bulkExitValidator(bytes[] calldata publicKeys, uint64[] calldata operatorIds) external;
 
+    /**********************************/
+    /* ETH-Native Methods (V2)        */
+    /**********************************/
+
+    /// @notice Emits when ETH is received by the proxy (e.g. from SSV withdraw/liquidate on ETH clusters)
+    /// @param _sender address that sent the ETH
+    /// @param _amount amount of ETH received
+    event P2pSsvProxy__EthReceived(
+        address indexed _sender,
+        uint256 _amount
+    );
+
+    /// @notice Registers new validators on the SSV Network using ETH payments
+    /// @dev Should be called by P2pSsvProxyFactory only. msg.value is forwarded to SSV as the cluster deposit.
+    /// @param publicKeys The public keys of the new validators
+    /// @param operatorIds Array of IDs of operators managing this validator
+    /// @param sharesData Encrypted shares related to the new validators
+    /// @param cluster Cluster to be used with the new validators
+    function bulkRegisterValidatorsEth(
+        bytes[] calldata publicKeys,
+        uint64[] calldata operatorIds,
+        bytes[] calldata sharesData,
+        ISSVNetwork.Cluster calldata cluster
+    ) external payable;
+
+    /// @notice Deposit ETH to SSV clusters
+    /// @dev Can be called by anyone. msg.value is split evenly across clusters (remainder to last).
+    /// @param _operatorIds SSV operator IDs
+    /// @param _clusters SSV clusters
+    function depositToSsvEth(
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster[] calldata _clusters
+    ) external payable;
+
+    /// @notice Reactivate SSV clusters using ETH payment
+    /// @dev Should be called by P2P only. msg.value is split evenly across clusters (remainder to last).
+    /// @param _operatorIds SSV operator IDs
+    /// @param _clusters SSV clusters
+    function reactivateEth(
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster[] calldata _clusters
+    ) external payable;
+
+    /// @notice Migrate an SSV-payment cluster to ETH payments
+    /// @dev Should be called by P2P only. msg.value is forwarded as the ETH deposit for the migrated cluster.
+    /// SSV tokens refunded by SSV remain in the proxy and should be swept via withdrawAllSSVTokensToFactory.
+    /// @param _operatorIds SSV operator IDs
+    /// @param _cluster SSV cluster to migrate
+    function migrateClusterToETH(
+        uint64[] calldata _operatorIds,
+        ISSVNetwork.Cluster calldata _cluster
+    ) external payable;
+
+    /// @notice Withdraw all ETH from this contract to the owner
+    /// @dev Should be called by P2P only
+    function withdrawEthToOwner() external;
+
+    /// @notice Emits when the P2pSsvProxyFactory address is updated
+    /// @param _oldFactory previous factory address
+    /// @param _newFactory new factory address
+    event P2pSsvProxy__P2pSsvProxyFactorySet(
+        address indexed _oldFactory,
+        address indexed _newFactory
+    );
+
+    /// @notice Update the P2pSsvProxyFactory address for this proxy
+    /// @dev Should be called by owner only. Changes the trust boundary for admin/operator resolution.
+    /// @param _newFactory new P2pSsvProxyFactory address (must support IP2pSsvProxyFactory interface)
+    function setP2pSsvProxyFactory(address _newFactory) external;
+
     /// @notice Returns the client address
     /// @return address client address
     function getClient() external view returns (address);
