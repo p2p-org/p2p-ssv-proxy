@@ -190,41 +190,6 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
         address _ssvOperatorOwner
     ) external;
 
-    /// @notice Computes the address of a P2pSsvProxy created by `_createP2pSsvProxy` function
-    /// @dev P2pSsvProxy instances are guaranteed to have the same address if _feeDistributorInstance is the same
-    /// @param _feeDistributorInstance The address of FeeDistributor instance
-    /// @return address client P2pSsvProxy instance that will be or has been deployed
-    function predictP2pSsvProxyAddress(
-        address _feeDistributorInstance
-    ) external view returns (address);
-
-    /// @notice Computes the address of a P2pSsvProxy created by `_createP2pSsvProxy` function
-    /// @param _referenceFeeDistributor The address of the reference implementation of FeeDistributor used as the basis for clones
-    /// @param _clientConfig address and basis points (percent * 100) of the client
-    /// @param _referrerConfig address and basis points (percent * 100) of the referrer.
-    /// @return address client P2pSsvProxy instance that will be or has been deployed
-    function predictP2pSsvProxyAddress(
-        address _referenceFeeDistributor,
-        FeeRecipient calldata _clientConfig,
-        FeeRecipient calldata _referrerConfig
-    ) external view returns (address);
-
-    /// @notice Computes the address of a P2pSsvProxy for the default referenceFeeDistributor
-    /// @param _clientConfig address and basis points (percent * 100) of the client
-    /// @param _referrerConfig address and basis points (percent * 100) of the referrer.
-    /// @return address client P2pSsvProxy instance that will be or has been deployed
-    function predictP2pSsvProxyAddress(
-        FeeRecipient calldata _clientConfig,
-        FeeRecipient calldata _referrerConfig
-    ) external view returns (address);
-
-    /// @notice Computes the address of a P2pSsvProxy for the default referenceFeeDistributor and referrerConfig
-    /// @param _clientConfig address and basis points (percent * 100) of the client
-    /// @return address client P2pSsvProxy instance that will be or has been deployed
-    function predictP2pSsvProxyAddress(
-        FeeRecipient calldata _clientConfig
-    ) external view returns (address);
-
     /// @notice Deploy P2pSsvProxy instance if not deployed before
     /// @param _feeDistributorInstance The address of FeeDistributor instance
     /// @return p2pSsvProxyInstance client P2pSsvProxy instance that has been deployed
@@ -427,7 +392,7 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
     event P2pSsvProxyFactory__BeaconSet(address indexed _beacon);
 
     /// @notice Set the UpgradeableBeacon address for new proxy deployments
-    /// @dev When set, new proxies are deployed as BeaconProxy instances. When unset, clone path is used.
+    /// @dev When set, new proxies are deployed as BeaconProxy instances.
     /// @param _beacon The UpgradeableBeacon address (its implementation must support IP2pSsvProxy)
     function setBeacon(address _beacon) external;
 
@@ -439,6 +404,13 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
     /// @param _feeDistributorInstance The address of FeeDistributor instance
     /// @return address the predicted proxy address
     function predictP2pSsvProxyAddressBeacon(
+        address _feeDistributorInstance
+    ) external view returns (address);
+
+    /// @notice Returns the canonical proxy deployed for a given FeeDistributor instance
+    /// @param _feeDistributorInstance The address of FeeDistributor instance
+    /// @return address of the deployed proxy, or address(0) if none
+    function getProxyByFeeDistributor(
         address _feeDistributorInstance
     ) external view returns (address);
 

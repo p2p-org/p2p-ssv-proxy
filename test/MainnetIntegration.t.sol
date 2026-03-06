@@ -19,6 +19,7 @@ import "../src/structs/P2pStructs.sol";
 import "../src/mocks/IChangeOperator.sol";
 import "../src/mocks/IMockSsvNetwork.sol";
 import "../src/mocks/IMockSsvNetworkViews.sol";
+import "../src/proxy/P2pUpgradeableBeacon.sol";
 
 contract MainnetIntegration is Test {
     address public constant ssvOwner = 0xb35096b074fdb9bBac63E3AdaE0Bbde512B2E6b6;
@@ -88,6 +89,9 @@ contract MainnetIntegration is Test {
         );
         referenceP2pSsvProxy = address(new P2pSsvProxy());
         p2pSsvProxyFactory.setReferenceP2pSsvProxy(referenceP2pSsvProxy);
+
+        P2pUpgradeableBeacon beacon = new P2pUpgradeableBeacon(referenceP2pSsvProxy, owner);
+        p2pSsvProxyFactory.setBeacon(address(beacon));
 
         operatorIds = new uint64[](4);
         operatorIds[0] = 145;
@@ -365,7 +369,7 @@ contract MainnetIntegration is Test {
 
     function predictProxyAddress() private view returns(address) {
         address feeDistributor = feeDistributorFactory.predictFeeDistributorAddress(referenceFeeDistributor, clientConfig, referrerConfig);
-        return p2pSsvProxyFactory.predictP2pSsvProxyAddress(feeDistributor);
+        return p2pSsvProxyFactory.predictP2pSsvProxyAddressBeacon(feeDistributor);
     }
 
     function test_depositEthAndRegisterValidators_Mainnet_Deprecated() public {
@@ -614,23 +618,8 @@ contract MainnetIntegration is Test {
                 referrerConfig
             );
 
-            address proxy_1 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(feeDistributorInstance);
-            address proxy_2 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(
-                referenceFeeDistributor_,
-                clientConfig,
-                referrerConfig
-            );
-            address proxy_3 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(
-                clientConfig,
-                referrerConfig
-            );
-            address proxy_4 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(
-                clientConfig
-            );
-
-            assertEq(proxy_1, proxy_2);
-            assertEq(proxy_1, proxy_3);
-            assertEq(proxy_1, proxy_4);
+            address proxy_1 = p2pSsvProxyFactory.predictP2pSsvProxyAddressBeacon(feeDistributorInstance);
+            assertTrue(proxy_1 != address(0));
         }
 
         console.log("test_viewFunctions finsihed");
@@ -690,7 +679,7 @@ contract MainnetIntegration is Test {
         uint256 neededEth = p2pSsvProxyFactory.getNeededAmountOfEtherToCoverSsvFees(ssvPayload1.tokenAmount);
 
         address feeDistributor = 0x98b2eFF7e900d741d5c90dab4E708DaEb2a063e1;
-        address proxy1 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(feeDistributor);
+        address proxy1 = p2pSsvProxyFactory.predictP2pSsvProxyAddressBeacon(feeDistributor);
         assertEq(proxy1.code.length, 0);
 
         vm.startPrank(owner);
@@ -1284,7 +1273,7 @@ contract MainnetIntegration is Test {
             clientConfig,
             referrerConfig
         );
-        address proxy_ = p2pSsvProxyFactory.predictP2pSsvProxyAddress(feeDistributorInstance_);
+        address proxy_ = p2pSsvProxyFactory.predictP2pSsvProxyAddressBeacon(feeDistributorInstance_);
 
         for (uint256 i = 0; i < allowedSsvOperatorOwners.length; i++) {
             vm.startPrank(allowedSsvOperatorOwners[i]);
