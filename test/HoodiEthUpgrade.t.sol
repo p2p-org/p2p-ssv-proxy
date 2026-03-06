@@ -824,5 +824,70 @@ contract HoodiEthUpgrade is Test {
         assertTrue(clusterAfterDeposit.balance > clusterAfterRegister.balance);
     }
 
+    event P2pSsvProxyFactory__SsvOperatorIdsCleared(address indexed _ssvOperatorOwner);
+
+    function test_removeAllowedSsvOperatorOwners_clearsOperatorIds() public {
+        address ownerToRemove = ethOperatorOwners[0];
+
+        uint64[24] memory idsBefore = factory.getAllowedSsvOperatorIds(ownerToRemove);
+        assertTrue(idsBefore[0] != 0, "operator IDs should be set before removal");
+
+        address[] memory toRemove = new address[](1);
+        toRemove[0] = ownerToRemove;
+        factory.removeAllowedSsvOperatorOwners(toRemove);
+
+        uint64[24] memory idsAfter = factory.getAllowedSsvOperatorIds(ownerToRemove);
+        assertEq(idsAfter[0], 0, "operator IDs should be cleared after removal");
+    }
+
+    function test_removeAllowedSsvOperatorOwners_emitsSsvOperatorIdsCleared() public {
+        address ownerToRemove = ethOperatorOwners[0];
+
+        address[] memory toRemove = new address[](1);
+        toRemove[0] = ownerToRemove;
+
+        vm.expectEmit(true, false, false, false);
+        emit P2pSsvProxyFactory__SsvOperatorIdsCleared(ownerToRemove);
+        factory.removeAllowedSsvOperatorOwners(toRemove);
+    }
+
+    function test_removeAllowedSsvOperatorOwners_clearsIdsForAllRemovedOwners() public {
+        factory.removeAllowedSsvOperatorOwners(ethOperatorOwners);
+
+        for (uint256 i = 0; i < ethOperatorOwners.length; ++i) {
+            uint64[24] memory ids = factory.getAllowedSsvOperatorIds(ethOperatorOwners[i]);
+            assertEq(ids[0], 0, "operator IDs should be cleared for all removed owners");
+        }
+    }
+
+    function test_registerValidatorsEth_revertsWhenUsingRemovedOwner() public {
+        address ownerToRemove = ethOperatorOwners[0];
+        uint64 operatorIdUsed = ethOperatorIds[0];
+
+        address[] memory toRemove = new address[](1);
+        toRemove[0] = ownerToRemove;
+        factory.removeAllowedSsvOperatorOwners(toRemove);
+
+        address[] memory removedOwnerAsArray = new address[](1);
+        removedOwnerAsArray[0] = ownerToRemove;
+        uint64[] memory singleId = new uint64[](1);
+        singleId[0] = operatorIdUsed;
+        (bytes[] memory pubkeys, bytes[] memory sharesData) = _buildSingleValidatorData();
+
+        vm.prank(client);
+        vm.expectRevert(
+            abi.encodeWithSelector(P2pSsvProxyFactory__SsvOperatorNotAllowed.selector, ownerToRemove, operatorIdUsed)
+        );
+        factory.registerValidatorsEth(
+            removedOwnerAsArray,
+            singleId,
+            pubkeys,
+            sharesData,
+            _getEmptyCluster(),
+            clientConfig,
+            referrerConfig
+        );
+    }
+
     receive() external payable {}
 }

@@ -229,6 +229,9 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         for (uint256 i = 0; i < operatorCount; ++i) {
             address currentOperatorOwner = _operators[i].owner;
 
+            if (!s_allowedSsvOperatorOwners.contains(currentOperatorOwner)) {
+                revert P2pSsvProxyFactory__SsvOperatorNotAllowed(currentOperatorOwner, _operators[i].id);
+            }
             bool isAllowed;
             for (uint256 j = 0; j < MAX_ALLOWED_SSV_OPERATOR_IDS; ++j) {
                 if (s_allowedSsvOperatorIds[currentOperatorOwner][j] == _operators[i].id) {
@@ -255,6 +258,9 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         for (uint256 i = 0; i < ownersCount; ++i) {
             address currentOperatorOwner = _operatorOwners[i];
 
+            if (!s_allowedSsvOperatorOwners.contains(currentOperatorOwner)) {
+                revert P2pSsvProxyFactory__SsvOperatorNotAllowed(currentOperatorOwner, _operatorIds[i]);
+            }
             bool isAllowed;
             for (uint256 j = 0; j < MAX_ALLOWED_SSV_OPERATOR_IDS; ++j) {
                 if (s_allowedSsvOperatorIds[currentOperatorOwner][j] == _operatorIds[i]) {
@@ -465,6 +471,8 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
             if (!s_allowedSsvOperatorOwners.remove(allowedSsvOperatorOwnersToRemove)) {
                 revert P2pSsvProxyFactory__SsvOperatorOwnerDoesNotExist(allowedSsvOperatorOwnersToRemove);
             }
+
+            _clearSsvOperatorIds(allowedSsvOperatorOwnersToRemove);
         }
 
         emit P2pSsvProxyFactory__AllowedSsvOperatorOwnersRemoved(_allowedSsvOperatorOwnersToRemove);
