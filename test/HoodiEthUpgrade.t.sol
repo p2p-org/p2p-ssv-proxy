@@ -105,7 +105,6 @@ contract HoodiEthUpgrade is Test {
         );
 
         referenceProxy = new P2pSsvProxy();
-        factory.setReferenceP2pSsvProxy(address(referenceProxy));
         beacon = new P2pUpgradeableBeacon(address(referenceProxy), owner);
     }
 
@@ -699,7 +698,6 @@ contract HoodiEthUpgrade is Test {
             FEE_DISTRIBUTOR_FACTORY,
             REFERENCE_FEE_DISTRIBUTOR
         );
-        factory2.setReferenceP2pSsvProxy(address(referenceProxy));
 
         vm.expectEmit(true, true, false, false, proxy);
         emit P2pSsvProxy__P2pSsvProxyFactorySet(address(factory), address(factory2));
@@ -714,7 +712,6 @@ contract HoodiEthUpgrade is Test {
             FEE_DISTRIBUTOR_FACTORY,
             REFERENCE_FEE_DISTRIBUTOR
         );
-        factory2.setReferenceP2pSsvProxy(address(referenceProxy));
 
         vm.prank(nobody);
         vm.expectRevert();

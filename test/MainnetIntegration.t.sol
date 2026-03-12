@@ -88,7 +88,6 @@ contract MainnetIntegration is Test {
             referenceFeeDistributor
         );
         referenceP2pSsvProxy = address(new P2pSsvProxy());
-        p2pSsvProxyFactory.setReferenceP2pSsvProxy(referenceP2pSsvProxy);
 
         P2pUpgradeableBeacon beacon = new P2pUpgradeableBeacon(referenceP2pSsvProxy, owner);
         p2pSsvProxyFactory.setBeacon(address(beacon));
@@ -572,8 +571,8 @@ contract MainnetIntegration is Test {
             address referenceFeeDistributorFromFactory = p2pSsvProxyFactory.getReferenceFeeDistributor();
             assertEq(referenceFeeDistributorFromFactory, referenceFeeDistributor);
 
-            address referenceP2pSsvProxyFromFactory = p2pSsvProxyFactory.getReferenceP2pSsvProxy();
-            assertEq(referenceP2pSsvProxyFromFactory, referenceP2pSsvProxy);
+            address beaconFromFactory = p2pSsvProxyFactory.getBeacon();
+            assertTrue(beaconFromFactory != address(0));
 
             uint256 ssvPerEthExchangeRateDividedByWeiFromFactory = p2pSsvProxyFactory.getSsvPerEthExchangeRateDividedByWei();
             assertEq(ssvPerEthExchangeRateDividedByWeiFromFactory, SsvPerEthExchangeRateDividedByWei);

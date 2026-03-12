@@ -78,7 +78,7 @@ error P2pSsvProxyFactory__MaxSsvTokenAmountPerValidatorOutOfRange();
 /// @notice SSV per ETH exchange rate has not been set. Cannot register validators without it.
 error P2pSsvProxyFactory__SsvPerEthExchangeRateDividedByWeiNotSet();
 
-/// @notice Maximum amount of SSV tokens per validator has not been set. Cannot do depositEthAndRegisterValidators without it.
+/// @notice Maximum amount of SSV tokens per validator has not been set. Required for validator registration.
 error P2pSsvProxyFactory__MaxSsvTokenAmountPerValidatorNotSet();
 
 /// @notice Cannot use token amount per validator larger than Maximum amount of SSV tokens per validator.
@@ -116,11 +116,6 @@ error P2pSsvProxyFactory__P2pSsvProxyDoesNotExist(
 /// @param _caller address of the caller
 error P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient(address _caller);
 
-/// @notice msg.value does not equal beacon collateral plus SSV ETH funding
-/// @param _expected expected msg.value
-/// @param _actual actual msg.value
-error P2pSsvProxyFactory__InvalidEthValue(uint256 _expected, uint256 _actual);
-
 /// @notice The given address is not a deployed P2pSsvProxy
 /// @param _address the address that is not a deployed P2pSsvProxy
 error P2pSsvProxyFactory__NotDeployedP2pSsvProxy(address _address);
@@ -155,11 +150,6 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     /// @dev Can be changed by P2P at any time. It will only affect the new clusters.
     /// Existing clusters will keep their existing FeeDistributor instance.
     address private s_referenceFeeDistributor;
-
-    /// @notice Template set by P2P to be used for new P2pSsvProxy instances.
-    /// @dev Can be changed by P2P at any time. It will only affect the new clusters.
-    /// Existing clusters will keep their existing P2pSsvProxy instance.
-    P2pSsvProxy private s_referenceP2pSsvProxy;
 
     /// @notice a set of addresses of SSV operator owners (both P2P and partners).
     /// @dev Only P2P can add or remove addresses from the set.
@@ -200,12 +190,12 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     /// The client agrees to this rate when calls `registerValidators` function.
     uint112 private s_ssvPerEthExchangeRateDividedByWei;
 
-    /// @notice Maximum amount of SSV tokens per validator that is allowed for client to deposit during `depositEthAndRegisterValidators`
+    /// @notice Maximum amount of SSV tokens per validator allowed for validator registration
     uint112 private s_maxSsvTokenAmountPerValidator;
 
     /// @notice UpgradeableBeacon address for new beacon-based proxy deployments.
     /// @dev When set (non-zero), new proxy instances are deployed as P2pBeaconProxy via CREATE2.
-    /// When unset (zero), the legacy clone path is used.
+    /// When unset (zero), proxy creation reverts with BeaconNotSet.
     address private s_beacon;
 
     /// @notice If the given _ssvOperatorOwner is not allowed, revert
@@ -353,16 +343,6 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         s_maxSsvTokenAmountPerValidator = _maxSsvTokenAmountPerValidator;
         emit P2pSsvProxyFactory__MaxSsvTokenAmountPerValidatorSet(_maxSsvTokenAmountPerValidator);
-    }
-
-    /// @inheritdoc IP2pSsvProxyFactory
-    function setReferenceP2pSsvProxy(address _referenceP2pSsvProxy) external onlyOwner {
-        if (!ERC165Checker.supportsInterface(_referenceP2pSsvProxy, type(IP2pSsvProxy).interfaceId)) {
-            revert P2pSsvProxyFactory__NotP2pSsvProxy(_referenceP2pSsvProxy);
-        }
-
-        s_referenceP2pSsvProxy = P2pSsvProxy(payable(_referenceP2pSsvProxy));
-        emit P2pSsvProxyFactory__ReferenceP2pSsvProxySet(_referenceP2pSsvProxy);
     }
 
     /// @inheritdoc IP2pSsvProxyFactory
@@ -854,7 +834,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     }
 
     /// @notice Register validators with SSV (up to 60, calldata size is the limit)
-    /// @dev Common logic for depositEthAndRegisterValidators and registerValidators functions
+    /// @dev Common logic for registerValidators and related functions
     /// @param _ssvPayload a stuct with data necessary for SSV registration (see `SsvPayload` struct for details)
     /// @param _clientConfig address and basis points (percent * 100) of the client (for FeeDistributor)
     /// @param _referrerConfig address and basis points (percent * 100) of the referrer (for FeeDistributor)
@@ -875,7 +855,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     }
 
     /// @notice Register validators with SSV
-    /// @dev Common logic for depositEthAndRegisterValidators and registerValidators functions
+    /// @dev Common logic for registerValidators and related functions
     /// @param _operatorOwners SSV operator owner addresses
     /// @param _operatorIds SSV operator IDs
     /// @param _publicKeys validator public keys
@@ -1052,11 +1032,6 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     /// @inheritdoc IP2pSsvProxyFactory
     function getReferenceFeeDistributor() external view returns (address) {
         return s_referenceFeeDistributor;
-    }
-
-    /// @inheritdoc IP2pSsvProxyFactory
-    function getReferenceP2pSsvProxy() external view returns (address) {
-        return address(s_referenceP2pSsvProxy);
     }
 
     /// @inheritdoc IP2pSsvProxyFactory
