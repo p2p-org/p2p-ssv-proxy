@@ -13,6 +13,7 @@ import "../src/interfaces/p2p/IFeeDistributor.sol";
 import "../src/interfaces/ssv/ISSVViews.sol";
 import "../src/structs/P2pStructs.sol";
 import "../src/access/OwnableBase.sol";
+import "../src/access/Ownable2Step.sol";
 import "../src/mocks/IChangeOperator.sol";
 
 contract HoodiEthUpgrade is Test {
@@ -70,6 +71,8 @@ contract HoodiEthUpgrade is Test {
     event P2pSsvProxy__Initialized(address indexed _feeDistributor);
     event P2pSsvProxyFactory__ClusterMigrationInitiated(address indexed _proxy, uint256 _ethDeposited);
     event P2pSsvProxyFactory__BeaconSet(address indexed _beacon);
+    event OwnershipTransferStarted(address indexed _previousOwner, address indexed _newOwner);
+    event OwnershipTransferred(address indexed _previousOwner, address indexed _newOwner);
 
     bytes32 private constant VALIDATOR_ADDED_TOPIC =
         keccak256("ValidatorAdded(address,uint64[],bytes,bytes,(uint32,uint64,uint64,bool,uint256))");
@@ -919,6 +922,80 @@ contract HoodiEthUpgrade is Test {
         // Deploying again for the same FD returns the same proxy (not a new one)
         address proxy2 = factory.createP2pSsvProxy(REFERENCE_FEE_DISTRIBUTOR);
         assertEq(proxy2, proxy, "should not deploy duplicate proxy after beacon rotation");
+    }
+
+    function test_beaconOwnership_twoStepTransfer() public {
+        address newOwner = address(0xABCD);
+
+        assertEq(beacon.owner(), owner);
+        assertEq(beacon.pendingOwner(), address(0));
+
+        vm.expectEmit(true, true, false, false, address(beacon));
+        emit OwnershipTransferStarted(owner, newOwner);
+        beacon.transferOwnership(newOwner);
+
+        assertEq(beacon.owner(), owner, "owner should not change before accept");
+        assertEq(beacon.pendingOwner(), newOwner);
+
+        vm.prank(newOwner);
+        vm.expectEmit(true, true, false, false, address(beacon));
+        emit OwnershipTransferred(owner, newOwner);
+        beacon.acceptOwnership();
+
+        assertEq(beacon.owner(), newOwner);
+        assertEq(beacon.pendingOwner(), address(0));
+    }
+
+    function test_beaconOwnership_acceptRevertsForNonPending() public {
+        address newOwner = address(0xABCD);
+        beacon.transferOwnership(newOwner);
+
+        vm.prank(nobody);
+        vm.expectRevert(Ownable2Step__CallerNotNewOwner.selector);
+        beacon.acceptOwnership();
+    }
+
+    function test_beaconOwnership_transferRevertsForNonOwner() public {
+        vm.prank(nobody);
+        vm.expectRevert(abi.encodeWithSelector(
+            OwnableBase__CallerNotOwner.selector,
+            nobody,
+            owner
+        ));
+        beacon.transferOwnership(nobody);
+    }
+
+    function test_beaconOwnership_transferToZeroCancelsPendingTransfer() public {
+        address newOwner = address(0xABCD);
+        beacon.transferOwnership(newOwner);
+        assertEq(beacon.pendingOwner(), newOwner);
+
+        beacon.transferOwnership(address(0));
+        assertEq(beacon.pendingOwner(), address(0));
+    }
+
+    function test_beaconOwnership_transferRevertsForCurrentOwner() public {
+        vm.expectRevert(Ownable2Step__NewOwnerShouldNotBeCurrentOwner.selector);
+        beacon.transferOwnership(owner);
+    }
+
+    function test_beaconOwnership_pendingOwnerOverwritten() public {
+        address first = address(0xABCD);
+        address second = address(0xBEEF);
+
+        beacon.transferOwnership(first);
+        assertEq(beacon.pendingOwner(), first);
+
+        beacon.transferOwnership(second);
+        assertEq(beacon.pendingOwner(), second);
+
+        vm.prank(first);
+        vm.expectRevert(Ownable2Step__CallerNotNewOwner.selector);
+        beacon.acceptOwnership();
+
+        vm.prank(second);
+        beacon.acceptOwnership();
+        assertEq(beacon.owner(), second);
     }
 
     receive() external payable {}
