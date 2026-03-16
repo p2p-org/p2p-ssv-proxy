@@ -10,8 +10,11 @@ out/
 # Docs
 docs/
 
-# Dotenv file
+# Dotenv files
 .env
+.env.hoodi-dev
+.env.hoodi-prod
+.env.mainnet
 /.idea/
 forge-cache
 deploy.sh

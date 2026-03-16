@@ -3,12 +3,14 @@ src = "src"
 out = "out"
 libs = ["lib"]
 cache_path  = 'forge-cache'
-solc-version = "0.8.24"
+solc = "0.8.24"
 evm_version = 'cancun'
 via_ir = true
 optimizer = true
-optimizer-runs = 200
+optimizer_runs = 10000
 
-rpc_endpoints = { mainnet = "https://eth.drpc.org", hoodi = "https://hoodi.drpc.org" }
+[rpc_endpoints]
+mainnet = "https://eth.drpc.org"
+hoodi = "https://hoodi.drpc.org"
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
