@@ -47,12 +47,6 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
         uint112 _maxSsvTokenAmountPerValidator
     );
 
-    /// @notice Emits when a new reference P2pSsvProxy has been set
-    /// @param _referenceP2pSsvProxy new reference P2pSsvProxy address
-    event P2pSsvProxyFactory__ReferenceP2pSsvProxySet(
-        address indexed _referenceP2pSsvProxy
-    );
-
     /// @notice Emits when new selectors were allowed for clients
     /// @param _selectors newly allowed selectors
     event P2pSsvProxyFactory__AllowedSelectorsForClientSet(
@@ -121,13 +115,9 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
     /// @param _ssvPerEthExchangeRateDividedByWei Exchange rate
     function setSsvPerEthExchangeRateDividedByWei(uint112 _ssvPerEthExchangeRateDividedByWei) external;
 
-    /// @notice Set Maximum amount of SSV tokens per validator that is allowed for client to deposit during `depositEthAndRegisterValidators`
+    /// @notice Set Maximum amount of SSV tokens per validator allowed for validator registration
     /// @param _maxSsvTokenAmountPerValidator Maximum amount of SSV tokens per validator
     function setMaxSsvTokenAmountPerValidator(uint112 _maxSsvTokenAmountPerValidator) external;
-
-    /// @notice Set template to be used for new P2pSsvProxy instances
-    /// @param _referenceP2pSsvProxy template to be used for new P2pSsvProxy instances
-    function setReferenceP2pSsvProxy(address _referenceP2pSsvProxy) external;
 
     /// @notice Allow selectors (function signatures) for clients to call on SSVNetwork via P2pSsvProxy
     /// @param _selectors selectors (function signatures) to allow for clients
@@ -189,41 +179,6 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
     function clearSsvOperatorIds(
         address _ssvOperatorOwner
     ) external;
-
-    /// @notice Computes the address of a P2pSsvProxy created by `_createP2pSsvProxy` function
-    /// @dev P2pSsvProxy instances are guaranteed to have the same address if _feeDistributorInstance is the same
-    /// @param _feeDistributorInstance The address of FeeDistributor instance
-    /// @return address client P2pSsvProxy instance that will be or has been deployed
-    function predictP2pSsvProxyAddress(
-        address _feeDistributorInstance
-    ) external view returns (address);
-
-    /// @notice Computes the address of a P2pSsvProxy created by `_createP2pSsvProxy` function
-    /// @param _referenceFeeDistributor The address of the reference implementation of FeeDistributor used as the basis for clones
-    /// @param _clientConfig address and basis points (percent * 100) of the client
-    /// @param _referrerConfig address and basis points (percent * 100) of the referrer.
-    /// @return address client P2pSsvProxy instance that will be or has been deployed
-    function predictP2pSsvProxyAddress(
-        address _referenceFeeDistributor,
-        FeeRecipient calldata _clientConfig,
-        FeeRecipient calldata _referrerConfig
-    ) external view returns (address);
-
-    /// @notice Computes the address of a P2pSsvProxy for the default referenceFeeDistributor
-    /// @param _clientConfig address and basis points (percent * 100) of the client
-    /// @param _referrerConfig address and basis points (percent * 100) of the referrer.
-    /// @return address client P2pSsvProxy instance that will be or has been deployed
-    function predictP2pSsvProxyAddress(
-        FeeRecipient calldata _clientConfig,
-        FeeRecipient calldata _referrerConfig
-    ) external view returns (address);
-
-    /// @notice Computes the address of a P2pSsvProxy for the default referenceFeeDistributor and referrerConfig
-    /// @param _clientConfig address and basis points (percent * 100) of the client
-    /// @return address client P2pSsvProxy instance that will be or has been deployed
-    function predictP2pSsvProxyAddress(
-        FeeRecipient calldata _clientConfig
-    ) external view returns (address);
 
     /// @notice Deploy P2pSsvProxy instance if not deployed before
     /// @param _feeDistributorInstance The address of FeeDistributor instance
@@ -427,7 +382,7 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
     event P2pSsvProxyFactory__BeaconSet(address indexed _beacon);
 
     /// @notice Set the UpgradeableBeacon address for new proxy deployments
-    /// @dev When set, new proxies are deployed as BeaconProxy instances. When unset, clone path is used.
+    /// @dev When set, new proxies are deployed as BeaconProxy instances.
     /// @param _beacon The UpgradeableBeacon address (its implementation must support IP2pSsvProxy)
     function setBeacon(address _beacon) external;
 
@@ -439,6 +394,13 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
     /// @param _feeDistributorInstance The address of FeeDistributor instance
     /// @return address the predicted proxy address
     function predictP2pSsvProxyAddressBeacon(
+        address _feeDistributorInstance
+    ) external view returns (address);
+
+    /// @notice Returns the canonical proxy deployed for a given FeeDistributor instance
+    /// @param _feeDistributorInstance The address of FeeDistributor instance
+    /// @return address of the deployed proxy, or address(0) if none
+    function getProxyByFeeDistributor(
         address _feeDistributorInstance
     ) external view returns (address);
 
@@ -479,10 +441,6 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
     /// @return a template set by P2P to be used for new FeeDistributor instances
     function getReferenceFeeDistributor() external view returns (address);
 
-    /// @notice Returns a template set by P2P to be used for new P2pSsvProxy instances
-    /// @return a template set by P2P to be used for new P2pSsvProxy instances
-    function getReferenceP2pSsvProxy() external view returns (address);
-
     /// @notice Returns exchange rate between SSV and ETH set by P2P
     /// @dev (If 1 SSV = 0.007539 ETH, it should be 0.007539 * 10^18 = 7539000000000000).
     /// Only used during validator registration without ETH deposits to cover SSV token costs with client ETH.
@@ -492,7 +450,7 @@ interface IP2pSsvProxyFactory is ISSVWhitelistingContract, IOwnableWithOperator,
     /// @return exchange rate between SSV and ETH set by P2P
     function getSsvPerEthExchangeRateDividedByWei() external view returns (uint112);
 
-    /// @notice Returns the maximum amount of SSV tokens per validator that is allowed for client to deposit during `depositEthAndRegisterValidators`
+    /// @notice Returns the maximum amount of SSV tokens per validator allowed for validator registration
     /// @return maximum amount of SSV tokens per validator
     function getMaxSsvTokenAmountPerValidator() external view returns (uint112);
 

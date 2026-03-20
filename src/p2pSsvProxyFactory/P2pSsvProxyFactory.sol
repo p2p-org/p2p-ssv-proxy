@@ -4,7 +4,6 @@
 pragma solidity 0.8.24;
 
 import "../@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import "../@openzeppelin/contracts/proxy/Clones.sol";
 import "../@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import "../@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
@@ -79,7 +78,7 @@ error P2pSsvProxyFactory__MaxSsvTokenAmountPerValidatorOutOfRange();
 /// @notice SSV per ETH exchange rate has not been set. Cannot register validators without it.
 error P2pSsvProxyFactory__SsvPerEthExchangeRateDividedByWeiNotSet();
 
-/// @notice Maximum amount of SSV tokens per validator has not been set. Cannot do depositEthAndRegisterValidators without it.
+/// @notice Maximum amount of SSV tokens per validator has not been set. Required for validator registration.
 error P2pSsvProxyFactory__MaxSsvTokenAmountPerValidatorNotSet();
 
 /// @notice Cannot use token amount per validator larger than Maximum amount of SSV tokens per validator.
@@ -117,11 +116,6 @@ error P2pSsvProxyFactory__P2pSsvProxyDoesNotExist(
 /// @param _caller address of the caller
 error P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient(address _caller);
 
-/// @notice msg.value does not equal beacon collateral plus SSV ETH funding
-/// @param _expected expected msg.value
-/// @param _actual actual msg.value
-error P2pSsvProxyFactory__InvalidEthValue(uint256 _expected, uint256 _actual);
-
 /// @notice The given address is not a deployed P2pSsvProxy
 /// @param _address the address that is not a deployed P2pSsvProxy
 error P2pSsvProxyFactory__NotDeployedP2pSsvProxy(address _address);
@@ -157,11 +151,6 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     /// Existing clusters will keep their existing FeeDistributor instance.
     address private s_referenceFeeDistributor;
 
-    /// @notice Template set by P2P to be used for new P2pSsvProxy instances.
-    /// @dev Can be changed by P2P at any time. It will only affect the new clusters.
-    /// Existing clusters will keep their existing P2pSsvProxy instance.
-    P2pSsvProxy private s_referenceP2pSsvProxy;
-
     /// @notice a set of addresses of SSV operator owners (both P2P and partners).
     /// @dev Only P2P can add or remove addresses from the set.
     EnumerableSet.AddressSet private s_allowedSsvOperatorOwners;
@@ -178,6 +167,10 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     /// @notice a mapping of (P2pSsvProxy instance address → hasBeenDeployed flag).
     /// @dev Updated automatically during P2pSsvProxy instance deployment.
     mapping(address => bool) private s_deployedP2pSsvProxies;
+
+    /// @notice Canonical mapping from FeeDistributor instance to its deployed P2pSsvProxy.
+    /// @dev Set once during proxy deployment. Used as source of truth for FD → proxy resolution.
+    mapping(address => address) private s_feeDistributorToProxy;
 
     /// @notice a list of all ever deployed client P2pSsvProxy instances.
     /// @dev Updated automatically during P2pSsvProxy instance deployment.
@@ -197,12 +190,12 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     /// The client agrees to this rate when calls `registerValidators` function.
     uint112 private s_ssvPerEthExchangeRateDividedByWei;
 
-    /// @notice Maximum amount of SSV tokens per validator that is allowed for client to deposit during `depositEthAndRegisterValidators`
+    /// @notice Maximum amount of SSV tokens per validator allowed for validator registration
     uint112 private s_maxSsvTokenAmountPerValidator;
 
     /// @notice UpgradeableBeacon address for new beacon-based proxy deployments.
     /// @dev When set (non-zero), new proxy instances are deployed as P2pBeaconProxy via CREATE2.
-    /// When unset (zero), the legacy clone path is used.
+    /// When unset (zero), proxy creation reverts with BeaconNotSet.
     address private s_beacon;
 
     /// @notice If the given _ssvOperatorOwner is not allowed, revert
@@ -229,6 +222,9 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         for (uint256 i = 0; i < operatorCount; ++i) {
             address currentOperatorOwner = _operators[i].owner;
 
+            if (!s_allowedSsvOperatorOwners.contains(currentOperatorOwner)) {
+                revert P2pSsvProxyFactory__SsvOperatorNotAllowed(currentOperatorOwner, _operators[i].id);
+            }
             bool isAllowed;
             for (uint256 j = 0; j < MAX_ALLOWED_SSV_OPERATOR_IDS; ++j) {
                 if (s_allowedSsvOperatorIds[currentOperatorOwner][j] == _operators[i].id) {
@@ -255,6 +251,9 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         for (uint256 i = 0; i < ownersCount; ++i) {
             address currentOperatorOwner = _operatorOwners[i];
 
+            if (!s_allowedSsvOperatorOwners.contains(currentOperatorOwner)) {
+                revert P2pSsvProxyFactory__SsvOperatorNotAllowed(currentOperatorOwner, _operatorIds[i]);
+            }
             bool isAllowed;
             for (uint256 j = 0; j < MAX_ALLOWED_SSV_OPERATOR_IDS; ++j) {
                 if (s_allowedSsvOperatorIds[currentOperatorOwner][j] == _operatorIds[i]) {
@@ -344,16 +343,6 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
 
         s_maxSsvTokenAmountPerValidator = _maxSsvTokenAmountPerValidator;
         emit P2pSsvProxyFactory__MaxSsvTokenAmountPerValidatorSet(_maxSsvTokenAmountPerValidator);
-    }
-
-    /// @inheritdoc IP2pSsvProxyFactory
-    function setReferenceP2pSsvProxy(address _referenceP2pSsvProxy) external onlyOwner {
-        if (!ERC165Checker.supportsInterface(_referenceP2pSsvProxy, type(IP2pSsvProxy).interfaceId)) {
-            revert P2pSsvProxyFactory__NotP2pSsvProxy(_referenceP2pSsvProxy);
-        }
-
-        s_referenceP2pSsvProxy = P2pSsvProxy(payable(_referenceP2pSsvProxy));
-        emit P2pSsvProxyFactory__ReferenceP2pSsvProxySet(_referenceP2pSsvProxy);
     }
 
     /// @inheritdoc IP2pSsvProxyFactory
@@ -465,6 +454,8 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
             if (!s_allowedSsvOperatorOwners.remove(allowedSsvOperatorOwnersToRemove)) {
                 revert P2pSsvProxyFactory__SsvOperatorOwnerDoesNotExist(allowedSsvOperatorOwnersToRemove);
             }
+
+            _clearSsvOperatorIds(allowedSsvOperatorOwnersToRemove);
         }
 
         emit P2pSsvProxyFactory__AllowedSsvOperatorOwnersRemoved(_allowedSsvOperatorOwnersToRemove);
@@ -497,57 +488,6 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         _clearSsvOperatorIds(_ssvOperatorOwner);
     }
 
-    /// @inheritdoc IP2pSsvProxyFactory
-    function predictP2pSsvProxyAddress(
-        address _feeDistributorInstance
-    ) public view returns (address) {
-        return Clones.predictDeterministicAddress(
-            address(s_referenceP2pSsvProxy),
-            bytes32(bytes20(_feeDistributorInstance))
-        );
-    }
-
-    /// @inheritdoc IP2pSsvProxyFactory
-    function predictP2pSsvProxyAddress(
-        address _referenceFeeDistributor,
-        FeeRecipient calldata _clientConfig,
-        FeeRecipient calldata _referrerConfig
-    ) external view returns (address) {
-        address feeDistributorInstance = i_feeDistributorFactory.predictFeeDistributorAddress(
-            _referenceFeeDistributor,
-            _clientConfig,
-            _referrerConfig
-        );
-        return predictP2pSsvProxyAddress(feeDistributorInstance);
-    }
-
-    /// @inheritdoc IP2pSsvProxyFactory
-    function predictP2pSsvProxyAddress(
-        FeeRecipient calldata _clientConfig,
-        FeeRecipient calldata _referrerConfig
-    ) external view returns (address) {
-        address feeDistributorInstance = i_feeDistributorFactory.predictFeeDistributorAddress(
-            s_referenceFeeDistributor,
-            _clientConfig,
-            _referrerConfig
-        );
-        return predictP2pSsvProxyAddress(feeDistributorInstance);
-    }
-
-    /// @inheritdoc IP2pSsvProxyFactory
-    function predictP2pSsvProxyAddress(
-        FeeRecipient calldata _clientConfig
-    ) external view returns (address) {
-        address feeDistributorInstance = i_feeDistributorFactory.predictFeeDistributorAddress(
-            s_referenceFeeDistributor,
-            _clientConfig,
-            FeeRecipient({
-                recipient: payable(address(0)),
-                basisPoints: 0
-            })
-        );
-        return predictP2pSsvProxyAddress(feeDistributorInstance);
-    }
 
     /// @inheritdoc IP2pSsvProxyFactory
     function createP2pSsvProxy(
@@ -689,8 +629,8 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         uint256 _amount,
         ISSVNetwork.Cluster calldata _cluster
     ) external onlyOperatorOrOwner returns (address p2pSsvProxy) {
-        p2pSsvProxy = predictP2pSsvProxyAddress(_feeDistributorInstance);
-        if (p2pSsvProxy.code.length == 0) {
+        p2pSsvProxy = s_feeDistributorToProxy[_feeDistributorInstance];
+        if (p2pSsvProxy == address(0)) {
             revert P2pSsvProxyFactory__P2pSsvProxyDoesNotExist(_feeDistributorInstance);
         }
 
@@ -839,40 +779,43 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     function _createP2pSsvProxyBeacon(
         address _feeDistributorInstance
     ) private returns(address p2pSsvProxyInstance) {
-        p2pSsvProxyInstance = predictP2pSsvProxyAddressBeacon(_feeDistributorInstance);
-        if (p2pSsvProxyInstance.code.length == 0) {
-            if (!ERC165Checker.supportsInterface(_feeDistributorInstance, type(IFeeDistributor).interfaceId)) {
-                revert P2pSsvProxyFactory__NotFeeDistributor(_feeDistributorInstance);
-            }
-
-            bytes memory initData = abi.encodeCall(P2pSsvProxy.initialize, (_feeDistributorInstance));
-            bytes32 salt = bytes32(bytes20(_feeDistributorInstance));
-            p2pSsvProxyInstance = address(new P2pBeaconProxy{salt: salt}(s_beacon, initData));
-
-            address client = IFeeDistributor(_feeDistributorInstance).client();
-
-            s_allClientP2pSsvProxies[client].push(p2pSsvProxyInstance);
-            s_allP2pSsvProxies.push(p2pSsvProxyInstance);
-            s_deployedP2pSsvProxies[p2pSsvProxyInstance] = true;
-
-            emit P2pSsvProxyFactory__P2pSsvProxyCreated(
-                p2pSsvProxyInstance,
-                client,
-                _feeDistributorInstance
-            );
+        p2pSsvProxyInstance = s_feeDistributorToProxy[_feeDistributorInstance];
+        if (p2pSsvProxyInstance != address(0)) {
+            return p2pSsvProxyInstance;
         }
+
+        if (!ERC165Checker.supportsInterface(_feeDistributorInstance, type(IFeeDistributor).interfaceId)) {
+            revert P2pSsvProxyFactory__NotFeeDistributor(_feeDistributorInstance);
+        }
+
+        bytes memory initData = abi.encodeCall(P2pSsvProxy.initialize, (_feeDistributorInstance));
+        bytes32 salt = bytes32(bytes20(_feeDistributorInstance));
+        p2pSsvProxyInstance = address(new P2pBeaconProxy{salt: salt}(s_beacon, initData));
+
+        address client = IFeeDistributor(_feeDistributorInstance).client();
+
+        s_feeDistributorToProxy[_feeDistributorInstance] = p2pSsvProxyInstance;
+        s_allClientP2pSsvProxies[client].push(p2pSsvProxyInstance);
+        s_allP2pSsvProxies.push(p2pSsvProxyInstance);
+        s_deployedP2pSsvProxies[p2pSsvProxyInstance] = true;
+
+        emit P2pSsvProxyFactory__P2pSsvProxyCreated(
+            p2pSsvProxyInstance,
+            client,
+            _feeDistributorInstance
+        );
     }
 
-    /// @notice Deploy P2pSsvProxy via beacon (if set) or via clone (legacy fallback)
+    /// @notice Deploy P2pSsvProxy via beacon proxy
     /// @param _feeDistributorInstance The address of FeeDistributor instance
     /// @return p2pSsvProxyInstance deployed proxy address
     function _createP2pSsvProxyAuto(
         address _feeDistributorInstance
     ) private returns(address p2pSsvProxyInstance) {
-        if (s_beacon != address(0)) {
-            return _createP2pSsvProxyBeacon(_feeDistributorInstance);
+        if (s_beacon == address(0)) {
+            revert P2pSsvProxyFactory__BeaconNotSet();
         }
-        return _createP2pSsvProxy(_feeDistributorInstance);
+        return _createP2pSsvProxyBeacon(_feeDistributorInstance);
     }
 
     function _checkTokenAmount(
@@ -891,7 +834,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     }
 
     /// @notice Register validators with SSV (up to 60, calldata size is the limit)
-    /// @dev Common logic for depositEthAndRegisterValidators and registerValidators functions
+    /// @dev Common logic for registerValidators and related functions
     /// @param _ssvPayload a stuct with data necessary for SSV registration (see `SsvPayload` struct for details)
     /// @param _clientConfig address and basis points (percent * 100) of the client (for FeeDistributor)
     /// @param _referrerConfig address and basis points (percent * 100) of the referrer (for FeeDistributor)
@@ -912,7 +855,7 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     }
 
     /// @notice Register validators with SSV
-    /// @dev Common logic for depositEthAndRegisterValidators and registerValidators functions
+    /// @dev Common logic for registerValidators and related functions
     /// @param _operatorOwners SSV operator owner addresses
     /// @param _operatorIds SSV operator IDs
     /// @param _publicKeys validator public keys
@@ -951,45 +894,6 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         emit P2pSsvProxyFactory__RegistrationCompleted(p2pSsvProxy);
     }
 
-    /// @notice Deploy P2pSsvProxy instance if not deployed before
-    /// @param _feeDistributorInstance The address of FeeDistributor instance
-    /// @return p2pSsvProxyInstance client P2pSsvProxy instance that has been deployed
-    function _createP2pSsvProxy(
-        address _feeDistributorInstance
-    ) private returns(address p2pSsvProxyInstance) {
-        p2pSsvProxyInstance = predictP2pSsvProxyAddress(_feeDistributorInstance);
-        if (p2pSsvProxyInstance.code.length == 0) { // if p2pSsvProxyInstance doesn't exist, deploy it
-            if (!ERC165Checker.supportsInterface(_feeDistributorInstance, type(IFeeDistributor).interfaceId)) {
-                revert P2pSsvProxyFactory__NotFeeDistributor(_feeDistributorInstance);
-            }
-
-            // clone the reference implementation of P2pSsvProxy
-            p2pSsvProxyInstance = Clones.cloneDeterministic(
-                address(s_referenceP2pSsvProxy),
-                bytes32(bytes20(_feeDistributorInstance))
-            );
-
-            // set the client address to the cloned P2pSsvProxy instance
-            P2pSsvProxy(payable(p2pSsvProxyInstance)).initialize(_feeDistributorInstance);
-
-            address client = IFeeDistributor(_feeDistributorInstance).client();
-
-            // append new P2pSsvProxy address to all client P2pSsvProxies array
-            s_allClientP2pSsvProxies[client].push(p2pSsvProxyInstance);
-
-            // append new P2pSsvProxy address to all P2pSsvProxies array
-            s_allP2pSsvProxies.push(p2pSsvProxyInstance);
-
-            s_deployedP2pSsvProxies[p2pSsvProxyInstance] = true;
-
-            // emit event with the address of the newly created instance for the external listener
-            emit P2pSsvProxyFactory__P2pSsvProxyCreated(
-                p2pSsvProxyInstance,
-                client,
-                _feeDistributorInstance
-            );
-        }
-    }
 
     /// @notice Deploy FeeDistributor instance if not deployed before
     /// @param _clientConfig address and basis points (percent * 100) of the client (for FeeDistributor)
@@ -1081,6 +985,13 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
         return super.owner();
     }
 
+    /// @notice Returns the canonical proxy deployed for a given FeeDistributor instance
+    /// @param _feeDistributorInstance The address of FeeDistributor instance
+    /// @return address of the deployed proxy, or address(0) if none
+    function getProxyByFeeDistributor(address _feeDistributorInstance) external view returns (address) {
+        return s_feeDistributorToProxy[_feeDistributorInstance];
+    }
+
     /// @inheritdoc IP2pSsvProxyFactory
     function getFeeDistributorFactory() external view returns (address) {
         return address(i_feeDistributorFactory);
@@ -1121,11 +1032,6 @@ contract P2pSsvProxyFactory is OwnableAssetRecoverer, OwnableWithOperator, ERC16
     /// @inheritdoc IP2pSsvProxyFactory
     function getReferenceFeeDistributor() external view returns (address) {
         return s_referenceFeeDistributor;
-    }
-
-    /// @inheritdoc IP2pSsvProxyFactory
-    function getReferenceP2pSsvProxy() external view returns (address) {
-        return address(s_referenceP2pSsvProxy);
     }
 
     /// @inheritdoc IP2pSsvProxyFactory

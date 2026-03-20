@@ -13,6 +13,7 @@ import "../src/interfaces/p2p/IFeeDistributor.sol";
 import "../src/interfaces/ssv/ISSVViews.sol";
 import "../src/structs/P2pStructs.sol";
 import "../src/access/OwnableBase.sol";
+import "../src/access/Ownable2Step.sol";
 import "../src/mocks/IChangeOperator.sol";
 
 contract HoodiEthUpgrade is Test {
@@ -70,6 +71,8 @@ contract HoodiEthUpgrade is Test {
     event P2pSsvProxy__Initialized(address indexed _feeDistributor);
     event P2pSsvProxyFactory__ClusterMigrationInitiated(address indexed _proxy, uint256 _ethDeposited);
     event P2pSsvProxyFactory__BeaconSet(address indexed _beacon);
+    event OwnershipTransferStarted(address indexed _previousOwner, address indexed _newOwner);
+    event OwnershipTransferred(address indexed _previousOwner, address indexed _newOwner);
 
     bytes32 private constant VALIDATOR_ADDED_TOPIC =
         keccak256("ValidatorAdded(address,uint64[],bytes,bytes,(uint32,uint64,uint64,bool,uint256))");
@@ -86,6 +89,7 @@ contract HoodiEthUpgrade is Test {
         _authorizeLocalFactoryInFeeDistributorFactory();
         _initLegacyTestDefaults();
         _initDefaultConfig();
+        _initBeacon();
         _initEthOperatorFixtures();
         _initEthValidatorFixtures();
         _initFunding();
@@ -104,7 +108,6 @@ contract HoodiEthUpgrade is Test {
         );
 
         referenceProxy = new P2pSsvProxy();
-        factory.setReferenceP2pSsvProxy(address(referenceProxy));
         beacon = new P2pUpgradeableBeacon(address(referenceProxy), owner);
     }
 
@@ -134,6 +137,10 @@ contract HoodiEthUpgrade is Test {
 
         factory.setSsvPerEthExchangeRateDividedByWei(7539000000000000);
         factory.setMaxSsvTokenAmountPerValidator(30 ether);
+    }
+
+    function _initBeacon() internal {
+        factory.setBeacon(address(beacon));
     }
 
     function _initEthOperatorFixtures() internal {
@@ -242,12 +249,7 @@ contract HoodiEthUpgrade is Test {
         sharesData[0] = hex"ddeeff";
     }
 
-    function _deployProxyViaClone() internal returns (address proxy) {
-        proxy = factory.createP2pSsvProxy(REFERENCE_FEE_DISTRIBUTOR);
-    }
-
     function _deployProxyViaBeacon() internal returns (address proxy) {
-        factory.setBeacon(address(beacon));
         proxy = factory.createP2pSsvProxy(REFERENCE_FEE_DISTRIBUTOR);
     }
 
@@ -274,7 +276,7 @@ contract HoodiEthUpgrade is Test {
         bytes[] memory sharesData = new bytes[](1);
         sharesData[0] = fixture.sharesData;
 
-        proxy = _deployProxyViaClone();
+        proxy = _deployProxyViaBeacon();
         vm.deal(address(factory), fixture.registerValue);
         vm.recordLogs();
         vm.prank(address(factory));
@@ -322,7 +324,7 @@ contract HoodiEthUpgrade is Test {
         MultiValidatorEthFixture memory f = _getMultiValidatorEthFixture();
         multiOperatorIds = f.ids;
 
-        proxy = _deployProxyViaClone();
+        proxy = _deployProxyViaBeacon();
         vm.deal(address(factory), f.registerValue);
         vm.recordLogs();
         vm.prank(address(factory));
@@ -455,21 +457,23 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_beaconProxyAddressPrediction() public {
-        factory.setBeacon(address(beacon));
         address predicted = factory.predictP2pSsvProxyAddressBeacon(REFERENCE_FEE_DISTRIBUTOR);
         address actual = factory.createP2pSsvProxy(REFERENCE_FEE_DISTRIBUTOR);
         assertEq(predicted, actual);
     }
 
-    function test_cloneFallbackWhenNoBeacon() public {
-        address proxy = _deployProxyViaClone();
-        assertTrue(proxy != address(0));
+    function test_revertsWhenNoBeacon() public {
+        P2pSsvProxyFactory noBeaconFactory = new P2pSsvProxyFactory(
+            P2P_ORG_UNLIMITED_ETH_DEPOSITOR,
+            FEE_DISTRIBUTOR_FACTORY,
+            REFERENCE_FEE_DISTRIBUTOR
+        );
         vm.expectRevert(P2pSsvProxyFactory__BeaconNotSet.selector);
-        factory.predictP2pSsvProxyAddressBeacon(REFERENCE_FEE_DISTRIBUTOR);
+        noBeaconFactory.createP2pSsvProxy(REFERENCE_FEE_DISTRIBUTOR);
     }
 
     function test_bulkRegisterValidatorsEth_onlyFactory() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
         (bytes[] memory pubkeys, bytes[] memory sharesData) = _buildSingleValidatorData();
         vm.prank(nobody);
         vm.expectRevert(abi.encodeWithSelector(
@@ -523,14 +527,14 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_depositToSsvEth_zeroClustersReverts() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
         ISSVNetworkCore.Cluster[] memory empty = new ISSVNetworkCore.Cluster[](0);
         vm.expectRevert(P2pSsvProxy__AmountOfParametersError.selector);
         P2pSsvProxy(payable(proxy)).depositToSsvEth{value: 1 ether}(operatorIds, empty);
     }
 
     function test_reactivateEth_accessAndZeroClustersReverts() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
 
         ISSVNetworkCore.Cluster[] memory one = new ISSVNetworkCore.Cluster[](1);
         one[0] = _getEmptyCluster();
@@ -546,7 +550,7 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_migrateClusterToETH_proxy_onlyFactory() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
         vm.prank(nobody);
         vm.expectRevert(abi.encodeWithSelector(
             P2pSsvProxy__NotP2pSsvProxyFactoryCalled.selector, nobody, IP2pSsvProxyFactory(address(factory))
@@ -639,7 +643,7 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_proxyReceivesEth() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
         vm.deal(address(this), 2 ether);
         vm.expectEmit(true, false, false, true, proxy);
         emit P2pSsvProxy__EthReceived(address(this), 1 ether);
@@ -649,7 +653,7 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_withdrawEthToOwner() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
         vm.deal(proxy, 2 ether);
         uint256 ownerBalBefore = owner.balance;
         P2pSsvProxy(payable(proxy)).withdrawEthToOwner();
@@ -665,7 +669,7 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_payableFallback_revertsWhenSelectorNotAllowlistedForOperator() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
         factory.changeOperator(operator);
         bytes4[] memory allowedSelectors = new bytes4[](1);
         allowedSelectors[0] = bytes4(keccak256("allowedOnly()"));
@@ -679,7 +683,7 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_payableFallback_emitsSuccessEvent_withGetVersion() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
         bytes4 selector = ISSVViews.getVersion.selector;
         vm.expectEmit(true, true, false, false, proxy);
         emit P2pSsvProxy__SuccessfullyCalledViaFallback(owner, selector);
@@ -690,14 +694,13 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_setP2pSsvProxyFactory() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
 
         P2pSsvProxyFactory factory2 = new P2pSsvProxyFactory(
             P2P_ORG_UNLIMITED_ETH_DEPOSITOR,
             FEE_DISTRIBUTOR_FACTORY,
             REFERENCE_FEE_DISTRIBUTOR
         );
-        factory2.setReferenceP2pSsvProxy(address(referenceProxy));
 
         vm.expectEmit(true, true, false, false, proxy);
         emit P2pSsvProxy__P2pSsvProxyFactorySet(address(factory), address(factory2));
@@ -706,13 +709,12 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_setP2pSsvProxyFactory_accessControl() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
         P2pSsvProxyFactory factory2 = new P2pSsvProxyFactory(
             P2P_ORG_UNLIMITED_ETH_DEPOSITOR,
             FEE_DISTRIBUTOR_FACTORY,
             REFERENCE_FEE_DISTRIBUTOR
         );
-        factory2.setReferenceP2pSsvProxy(address(referenceProxy));
 
         vm.prank(nobody);
         vm.expectRevert();
@@ -724,7 +726,7 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_initializeCannotBeCalledTwice() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
         vm.prank(address(factory));
         vm.expectRevert(P2pSsvProxy__AlreadyInitialized.selector);
         P2pSsvProxy(payable(proxy)).initialize(REFERENCE_FEE_DISTRIBUTOR);
@@ -742,7 +744,6 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_beaconUpgrade() public {
-        factory.setBeacon(address(beacon));
         address proxy = factory.createP2pSsvProxy(REFERENCE_FEE_DISTRIBUTOR);
         assertEq(P2pSsvProxy(payable(proxy)).getFactory(), address(factory));
 
@@ -754,7 +755,7 @@ contract HoodiEthUpgrade is Test {
     }
 
     function test_supportsInterface() public {
-        address proxy = _deployProxyViaClone();
+        address proxy = _deployProxyViaBeacon();
 
         bytes4 proxyV1Id = type(IP2pSsvProxy).interfaceId
             ^ IP2pSsvProxy.bulkRegisterValidatorsEth.selector
@@ -769,15 +770,11 @@ contract HoodiEthUpgrade is Test {
         assertTrue(P2pSsvProxy(payable(proxy)).supportsInterface(proxyCurrentId));
         assertFalse(P2pSsvProxy(payable(proxy)).supportsInterface(bytes4(0xffffffff)));
 
-        bytes4 factoryV1Id = type(IP2pSsvProxyFactory).interfaceId
-            ^ IP2pSsvProxyFactory.registerValidatorsEth.selector
-            ^ IP2pSsvProxyFactory.depositToSsvEth.selector
-            ^ IP2pSsvProxyFactory.migrateClusterToETH.selector
-            ^ IP2pSsvProxyFactory.setBeacon.selector
-            ^ IP2pSsvProxyFactory.getBeacon.selector
-            ^ IP2pSsvProxyFactory.predictP2pSsvProxyAddressBeacon.selector;
+        bytes4 factoryV1Id = 0xd73c1ea2;
+        bytes4 factoryV2Id = 0x86829d35;
         bytes4 factoryCurrentId = type(IP2pSsvProxyFactory).interfaceId;
         assertTrue(factory.supportsInterface(factoryV1Id));
+        assertTrue(factory.supportsInterface(factoryV2Id));
         assertTrue(factory.supportsInterface(factoryCurrentId));
         assertTrue(factory.supportsInterface(type(ISSVWhitelistingContract).interfaceId));
         assertFalse(factory.supportsInterface(bytes4(0xffffffff)));
@@ -822,6 +819,183 @@ contract HoodiEthUpgrade is Test {
 
         assertEq(clusterAfterDeposit.validatorCount, 2);
         assertTrue(clusterAfterDeposit.balance > clusterAfterRegister.balance);
+    }
+
+    event P2pSsvProxyFactory__SsvOperatorIdsCleared(address indexed _ssvOperatorOwner);
+
+    function test_removeAllowedSsvOperatorOwners_clearsOperatorIds() public {
+        address ownerToRemove = ethOperatorOwners[0];
+
+        uint64[24] memory idsBefore = factory.getAllowedSsvOperatorIds(ownerToRemove);
+        assertTrue(idsBefore[0] != 0, "operator IDs should be set before removal");
+
+        address[] memory toRemove = new address[](1);
+        toRemove[0] = ownerToRemove;
+        factory.removeAllowedSsvOperatorOwners(toRemove);
+
+        uint64[24] memory idsAfter = factory.getAllowedSsvOperatorIds(ownerToRemove);
+        assertEq(idsAfter[0], 0, "operator IDs should be cleared after removal");
+    }
+
+    function test_removeAllowedSsvOperatorOwners_emitsSsvOperatorIdsCleared() public {
+        address ownerToRemove = ethOperatorOwners[0];
+
+        address[] memory toRemove = new address[](1);
+        toRemove[0] = ownerToRemove;
+
+        vm.expectEmit(true, false, false, false);
+        emit P2pSsvProxyFactory__SsvOperatorIdsCleared(ownerToRemove);
+        factory.removeAllowedSsvOperatorOwners(toRemove);
+    }
+
+    function test_removeAllowedSsvOperatorOwners_clearsIdsForAllRemovedOwners() public {
+        factory.removeAllowedSsvOperatorOwners(ethOperatorOwners);
+
+        for (uint256 i = 0; i < ethOperatorOwners.length; ++i) {
+            uint64[24] memory ids = factory.getAllowedSsvOperatorIds(ethOperatorOwners[i]);
+            assertEq(ids[0], 0, "operator IDs should be cleared for all removed owners");
+        }
+    }
+
+    function test_registerValidatorsEth_revertsWhenUsingRemovedOwner() public {
+        address ownerToRemove = ethOperatorOwners[0];
+        uint64 operatorIdUsed = ethOperatorIds[0];
+
+        address[] memory toRemove = new address[](1);
+        toRemove[0] = ownerToRemove;
+        factory.removeAllowedSsvOperatorOwners(toRemove);
+
+        address[] memory removedOwnerAsArray = new address[](1);
+        removedOwnerAsArray[0] = ownerToRemove;
+        uint64[] memory singleId = new uint64[](1);
+        singleId[0] = operatorIdUsed;
+        (bytes[] memory pubkeys, bytes[] memory sharesData) = _buildSingleValidatorData();
+
+        vm.prank(client);
+        vm.expectRevert(
+            abi.encodeWithSelector(P2pSsvProxyFactory__SsvOperatorNotAllowed.selector, ownerToRemove, operatorIdUsed)
+        );
+        factory.registerValidatorsEth(
+            removedOwnerAsArray,
+            singleId,
+            pubkeys,
+            sharesData,
+            _getEmptyCluster(),
+            clientConfig,
+            referrerConfig
+        );
+    }
+
+    /**********************************/
+    /* Canonical Mapping Tests         */
+    /**********************************/
+
+    function test_getProxyByFeeDistributor_returnsDeployedProxy() public {
+        address proxy = _deployProxyViaBeacon();
+        address mapped = factory.getProxyByFeeDistributor(REFERENCE_FEE_DISTRIBUTOR);
+        assertEq(mapped, proxy);
+    }
+
+    function test_getProxyByFeeDistributor_returnsZeroForUnknownFD() public view {
+        address mapped = factory.getProxyByFeeDistributor(address(0xdead));
+        assertEq(mapped, address(0));
+    }
+
+    function test_canonicalMapping_idempotentDeployment() public {
+        address proxy1 = _deployProxyViaBeacon();
+        address proxy2 = factory.createP2pSsvProxy(REFERENCE_FEE_DISTRIBUTOR);
+        assertEq(proxy1, proxy2, "second call should return same proxy");
+    }
+
+    function test_canonicalMapping_survivesBeaconRotation() public {
+        address proxy = _deployProxyViaBeacon();
+
+        // Rotate beacon to a new one
+        P2pSsvProxy newImpl = new P2pSsvProxy();
+        P2pUpgradeableBeacon newBeacon = new P2pUpgradeableBeacon(address(newImpl), owner);
+        factory.setBeacon(address(newBeacon));
+
+        // Mapping still resolves to the original proxy
+        address mapped = factory.getProxyByFeeDistributor(REFERENCE_FEE_DISTRIBUTOR);
+        assertEq(mapped, proxy, "canonical mapping should survive beacon rotation");
+
+        // Deploying again for the same FD returns the same proxy (not a new one)
+        address proxy2 = factory.createP2pSsvProxy(REFERENCE_FEE_DISTRIBUTOR);
+        assertEq(proxy2, proxy, "should not deploy duplicate proxy after beacon rotation");
+    }
+
+    function test_beaconOwnership_twoStepTransfer() public {
+        address newOwner = address(0xABCD);
+
+        assertEq(beacon.owner(), owner);
+        assertEq(beacon.pendingOwner(), address(0));
+
+        vm.expectEmit(true, true, false, false, address(beacon));
+        emit OwnershipTransferStarted(owner, newOwner);
+        beacon.transferOwnership(newOwner);
+
+        assertEq(beacon.owner(), owner, "owner should not change before accept");
+        assertEq(beacon.pendingOwner(), newOwner);
+
+        vm.prank(newOwner);
+        vm.expectEmit(true, true, false, false, address(beacon));
+        emit OwnershipTransferred(owner, newOwner);
+        beacon.acceptOwnership();
+
+        assertEq(beacon.owner(), newOwner);
+        assertEq(beacon.pendingOwner(), address(0));
+    }
+
+    function test_beaconOwnership_acceptRevertsForNonPending() public {
+        address newOwner = address(0xABCD);
+        beacon.transferOwnership(newOwner);
+
+        vm.prank(nobody);
+        vm.expectRevert(Ownable2Step__CallerNotNewOwner.selector);
+        beacon.acceptOwnership();
+    }
+
+    function test_beaconOwnership_transferRevertsForNonOwner() public {
+        vm.prank(nobody);
+        vm.expectRevert(abi.encodeWithSelector(
+            OwnableBase__CallerNotOwner.selector,
+            nobody,
+            owner
+        ));
+        beacon.transferOwnership(nobody);
+    }
+
+    function test_beaconOwnership_transferToZeroCancelsPendingTransfer() public {
+        address newOwner = address(0xABCD);
+        beacon.transferOwnership(newOwner);
+        assertEq(beacon.pendingOwner(), newOwner);
+
+        beacon.transferOwnership(address(0));
+        assertEq(beacon.pendingOwner(), address(0));
+    }
+
+    function test_beaconOwnership_transferRevertsForCurrentOwner() public {
+        vm.expectRevert(Ownable2Step__NewOwnerShouldNotBeCurrentOwner.selector);
+        beacon.transferOwnership(owner);
+    }
+
+    function test_beaconOwnership_pendingOwnerOverwritten() public {
+        address first = address(0xABCD);
+        address second = address(0xBEEF);
+
+        beacon.transferOwnership(first);
+        assertEq(beacon.pendingOwner(), first);
+
+        beacon.transferOwnership(second);
+        assertEq(beacon.pendingOwner(), second);
+
+        vm.prank(first);
+        vm.expectRevert(Ownable2Step__CallerNotNewOwner.selector);
+        beacon.acceptOwnership();
+
+        vm.prank(second);
+        beacon.acceptOwnership();
+        assertEq(beacon.owner(), second);
     }
 
     receive() external payable {}
