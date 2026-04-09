@@ -5,6 +5,7 @@ pragma solidity 0.8.24;
 
 import {Script} from "forge-std/Script.sol";
 import "../src/p2pSsvProxyFactory/P2pSsvProxyFactory.sol";
+import "../src/proxy/P2pUpgradeableBeacon.sol";
 import "../src/mocks/IChangeOperator.sol";
 
 contract Deploy is Script {
@@ -25,8 +26,9 @@ contract Deploy is Script {
             feeDistributorFactory,
             referenceFeeDistributor
         );
-        P2pSsvProxy referenceP2pSsvProxy = new P2pSsvProxy(address(p2pSsvProxyFactory));
-        p2pSsvProxyFactory.setReferenceP2pSsvProxy(address(referenceP2pSsvProxy));
+        P2pSsvProxy referenceP2pSsvProxy = new P2pSsvProxy();
+        P2pUpgradeableBeacon beacon = new P2pUpgradeableBeacon(address(referenceP2pSsvProxy), msg.sender);
+        p2pSsvProxyFactory.setBeacon(address(beacon));
 
         IChangeOperator(address(feeDistributorFactory)).changeOperator(address(p2pSsvProxyFactory));
 

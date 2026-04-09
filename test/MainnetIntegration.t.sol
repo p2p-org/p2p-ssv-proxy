@@ -19,6 +19,7 @@ import "../src/structs/P2pStructs.sol";
 import "../src/mocks/IChangeOperator.sol";
 import "../src/mocks/IMockSsvNetwork.sol";
 import "../src/mocks/IMockSsvNetworkViews.sol";
+import "../src/proxy/P2pUpgradeableBeacon.sol";
 
 contract MainnetIntegration is Test {
     address public constant ssvOwner = 0xb35096b074fdb9bBac63E3AdaE0Bbde512B2E6b6;
@@ -86,8 +87,10 @@ contract MainnetIntegration is Test {
             address(feeDistributorFactory),
             referenceFeeDistributor
         );
-        referenceP2pSsvProxy = address(new P2pSsvProxy(address(p2pSsvProxyFactory)));
-        p2pSsvProxyFactory.setReferenceP2pSsvProxy(referenceP2pSsvProxy);
+        referenceP2pSsvProxy = address(new P2pSsvProxy());
+
+        P2pUpgradeableBeacon beacon = new P2pUpgradeableBeacon(referenceP2pSsvProxy, owner);
+        p2pSsvProxyFactory.setBeacon(address(beacon));
 
         operatorIds = new uint64[](4);
         operatorIds[0] = 145;
@@ -365,39 +368,19 @@ contract MainnetIntegration is Test {
 
     function predictProxyAddress() private view returns(address) {
         address feeDistributor = feeDistributorFactory.predictFeeDistributorAddress(referenceFeeDistributor, clientConfig, referrerConfig);
-        return p2pSsvProxyFactory.predictP2pSsvProxyAddress(feeDistributor);
+        return p2pSsvProxyFactory.predictP2pSsvProxyAddressBeacon(feeDistributor);
     }
 
-    function test_depositEthAndRegisterValidators_Mainnet() public {
-        console.log("test_depositEthAndRegisterValidators_Mainnet started");
+    function test_depositEthAndRegisterValidators_Mainnet_Deprecated() public {
+        console.log("test_depositEthAndRegisterValidators_Mainnet_Deprecated started");
 
         vm.deal(client, 1000 ether);
         vm.startPrank(client);
 
-        DepositData memory depositData1DifferentLength = getDepositData1DifferentLength();
         DepositData memory depositData1 = getDepositData1();
         SsvPayload memory ssvPayload1 = getSsvPayload1();
 
-        vm.expectRevert(abi.encodeWithSelector(
-            P2pSsvProxyFactory__DepositDataArraysShouldHaveTheSameLength.selector, 5, 4, 5
-        ));
-        p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 160 ether}(
-            depositData1DifferentLength,
-            withdrawalCredentialsAddress,
-            ssvPayload1,
-            clientConfig,
-            referrerConfig
-        );
-
-        vm.expectRevert(abi.encodeWithSelector(P2pSsvProxyFactory__EthValueMustBe32TimesValidatorCount.selector, 159 ether));
-        p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 159 ether}(
-            depositData1,
-            withdrawalCredentialsAddress,
-            ssvPayload1,
-            clientConfig,
-            referrerConfig
-        );
-
+        vm.expectRevert(P2pSsvProxyFactory__DeprecatedFunction.selector);
         p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 160 ether}(
             depositData1,
             withdrawalCredentialsAddress,
@@ -408,56 +391,15 @@ contract MainnetIntegration is Test {
 
         vm.stopPrank();
 
-        address proxy_ = p2pSsvProxyFactory.predictP2pSsvProxyAddress(clientConfig);
-        bool isWhitelisted = p2pSsvProxyFactory.isWhitelisted(proxy_, 42);
-        assertTrue(isWhitelisted);
-
-        vm.roll(block.number + 5000);
-
-        vm.startPrank(owner);
-        p2pSsvProxyFactory.setMaxSsvTokenAmountPerValidator(MaxSsvTokenAmountPerValidator / 10);
-        vm.stopPrank();
-
-        DepositData memory depositData2 = getDepositData2();
-        SsvPayload memory ssvPayload2 = getSsvPayload2();
-
-        vm.startPrank(client);
-        vm.expectRevert(P2pSsvProxyFactory__MaxSsvTokenAmountPerValidatorExceeded.selector);
-        p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 64 ether}(
-            depositData2,
-            withdrawalCredentialsAddress,
-            ssvPayload2,
-            clientConfig,
-            referrerConfig
-        );
-        vm.stopPrank();
-
-        vm.startPrank(owner);
-        p2pSsvProxyFactory.setMaxSsvTokenAmountPerValidator(MaxSsvTokenAmountPerValidator);
-        vm.stopPrank();
-
-        vm.startPrank(client);
-
-        p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 64 ether}(
-            depositData2,
-            withdrawalCredentialsAddress,
-            ssvPayload2,
-            clientConfig,
-            referrerConfig
-        );
-
-        vm.stopPrank();
-
-        console.log("test_depositEthAndRegisterValidators_Mainnet finsihed");
+        console.log("test_depositEthAndRegisterValidators_Mainnet_Deprecated finished");
     }
 
-    function test_depositEthAndRegisterValidators_via_bulkRegisterValidators() public {
-        console.log("test_depositEthAndRegisterValidators_via_bulkRegisterValidators started");
+    function test_depositEthAndRegisterValidators_via_bulkRegisterValidators_Deprecated() public {
+        console.log("test_depositEthAndRegisterValidators_via_bulkRegisterValidators_Deprecated started");
 
         vm.deal(client, 1000 ether);
         vm.startPrank(client);
 
-        DepositData memory depositData1DifferentLength = getDepositData1DifferentLength();
         DepositData memory depositData1 = getDepositData1();
 
         bytes[] memory pubKeys1 = new bytes[](5);
@@ -467,40 +409,7 @@ contract MainnetIntegration is Test {
             sharesData1[i] = validatorSharesData[i];
         }
 
-        vm.expectRevert(abi.encodeWithSelector(
-            P2pSsvProxyFactory__DepositDataArraysShouldHaveTheSameLength.selector, 5, 4, 5
-        ));
-        p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 160 ether}(
-            depositData1DifferentLength,
-            withdrawalCredentialsAddress,
-
-            allowedSsvOperatorOwners,
-            operatorIds,
-            pubKeys1,
-            sharesData1,
-            getTokenAmount1(),
-            getCluster1(),
-
-            clientConfig,
-            referrerConfig
-        );
-
-        vm.expectRevert(abi.encodeWithSelector(P2pSsvProxyFactory__EthValueMustBe32TimesValidatorCount.selector, 159 ether));
-        p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 159 ether}(
-            depositData1,
-            withdrawalCredentialsAddress,
-
-            allowedSsvOperatorOwners,
-            operatorIds,
-            pubKeys1,
-            sharesData1,
-            getTokenAmount1(),
-            getCluster1(),
-
-            clientConfig,
-            referrerConfig
-        );
-
+        vm.expectRevert(P2pSsvProxyFactory__DeprecatedFunction.selector);
         p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 160 ether}(
             depositData1,
             withdrawalCredentialsAddress,
@@ -518,63 +427,7 @@ contract MainnetIntegration is Test {
 
         vm.stopPrank();
 
-        vm.roll(block.number + 5000);
-
-        vm.startPrank(owner);
-        p2pSsvProxyFactory.setMaxSsvTokenAmountPerValidator(MaxSsvTokenAmountPerValidator / 10);
-        vm.stopPrank();
-
-        DepositData memory depositData2 = getDepositData2();
-
-        bytes[] memory pubKeys2 = new bytes[](2);
-        bytes[] memory sharesData2 = new bytes[](2);
-        for (uint256 i = 0; i < 2; i++) {
-            pubKeys2[i] = validatorPubKeys[i + 5];
-            sharesData2[i] = validatorSharesData[i + 5];
-        }
-
-        vm.startPrank(client);
-        vm.expectRevert(P2pSsvProxyFactory__MaxSsvTokenAmountPerValidatorExceeded.selector);
-        p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 64 ether}(
-            depositData2,
-            withdrawalCredentialsAddress,
-
-            allowedSsvOperatorOwners,
-            operatorIds,
-            pubKeys2,
-            sharesData2,
-            getTokenAmount1(),
-            clusterAfter1stRegistation,
-
-            clientConfig,
-            referrerConfig
-        );
-        vm.stopPrank();
-
-        vm.startPrank(owner);
-        p2pSsvProxyFactory.setMaxSsvTokenAmountPerValidator(MaxSsvTokenAmountPerValidator);
-        vm.stopPrank();
-
-        vm.startPrank(client);
-
-        p2pSsvProxyFactory.depositEthAndRegisterValidators{value: 64 ether}(
-            depositData2,
-            withdrawalCredentialsAddress,
-
-            allowedSsvOperatorOwners,
-            operatorIds,
-            pubKeys2,
-            sharesData2,
-            getTokenAmount1(),
-            clusterAfter1stRegistation,
-
-            clientConfig,
-            referrerConfig
-        );
-
-        vm.stopPrank();
-
-        console.log("test_depositEthAndRegisterValidators_via_bulkRegisterValidators finsihed");
+        console.log("test_depositEthAndRegisterValidators_via_bulkRegisterValidators_Deprecated finished");
     }
 
     function registerValidators() private {
@@ -584,17 +437,25 @@ contract MainnetIntegration is Test {
 
         SsvPayload memory ssvPayload1 = getSsvPayload1();
 
-        vm.deal(client, 1000 ether);
-        vm.startPrank(client);
-
         uint256 neededEth = p2pSsvProxyFactory.getNeededAmountOfEtherToCoverSsvFees(ssvPayload1.tokenAmount);
 
+        vm.deal(nobody, 1000 ether);
+        vm.startPrank(nobody);
+        vm.expectRevert(abi.encodeWithSelector(P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient.selector, nobody));
         p2pSsvProxyFactory.registerValidators{value: neededEth}(
             ssvPayload1,
             clientConfig,
             referrerConfig
         );
+        vm.stopPrank();
 
+        vm.deal(client, 1000 ether);
+        vm.startPrank(client);
+        p2pSsvProxyFactory.registerValidators{value: neededEth}(
+            ssvPayload1,
+            clientConfig,
+            referrerConfig
+        );
         vm.stopPrank();
     }
 
@@ -660,16 +521,16 @@ contract MainnetIntegration is Test {
         vm.stopPrank();
 
         {
-        address clientFromProxy = P2pSsvProxy(proxy1).getClient();
+        address clientFromProxy = P2pSsvProxy(payable(proxy1)).getClient();
         assertEq(clientFromProxy, client);
 
-        address factoryFromProxy = P2pSsvProxy(proxy1).getFactory();
+        address factoryFromProxy = P2pSsvProxy(payable(proxy1)).getFactory();
         assertEq(factoryFromProxy, address(p2pSsvProxyFactory));
 
-        address feeDistributorFromProxy = P2pSsvProxy(proxy1).getFeeDistributor();
+        address feeDistributorFromProxy = P2pSsvProxy(payable(proxy1)).getFeeDistributor();
         assertEq(feeDistributorFromProxy, feeDistributor);
 
-        address ownerFromProxy = P2pSsvProxy(proxy1).owner();
+        address ownerFromProxy = P2pSsvProxy(payable(proxy1)).owner();
         assertEq(ownerFromProxy, owner);
         }
 
@@ -678,7 +539,7 @@ contract MainnetIntegration is Test {
         vm.stopPrank();
 
         {
-        address operatorFromProxy = P2pSsvProxy(proxy1).operator();
+        address operatorFromProxy = P2pSsvProxy(payable(proxy1)).operator();
         assertEq(operatorFromProxy, operator);
 
         address operatorFromFactory = p2pSsvProxyFactory.operator();
@@ -710,8 +571,8 @@ contract MainnetIntegration is Test {
             address referenceFeeDistributorFromFactory = p2pSsvProxyFactory.getReferenceFeeDistributor();
             assertEq(referenceFeeDistributorFromFactory, referenceFeeDistributor);
 
-            address referenceP2pSsvProxyFromFactory = p2pSsvProxyFactory.getReferenceP2pSsvProxy();
-            assertEq(referenceP2pSsvProxyFromFactory, referenceP2pSsvProxy);
+            address beaconFromFactory = p2pSsvProxyFactory.getBeacon();
+            assertTrue(beaconFromFactory != address(0));
 
             uint256 ssvPerEthExchangeRateDividedByWeiFromFactory = p2pSsvProxyFactory.getSsvPerEthExchangeRateDividedByWei();
             assertEq(ssvPerEthExchangeRateDividedByWeiFromFactory, SsvPerEthExchangeRateDividedByWei);
@@ -756,23 +617,8 @@ contract MainnetIntegration is Test {
                 referrerConfig
             );
 
-            address proxy_1 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(feeDistributorInstance);
-            address proxy_2 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(
-                referenceFeeDistributor_,
-                clientConfig,
-                referrerConfig
-            );
-            address proxy_3 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(
-                clientConfig,
-                referrerConfig
-            );
-            address proxy_4 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(
-                clientConfig
-            );
-
-            assertEq(proxy_1, proxy_2);
-            assertEq(proxy_1, proxy_3);
-            assertEq(proxy_1, proxy_4);
+            address proxy_1 = p2pSsvProxyFactory.predictP2pSsvProxyAddressBeacon(feeDistributorInstance);
+            assertTrue(proxy_1 != address(0));
         }
 
         console.log("test_viewFunctions finsihed");
@@ -814,7 +660,7 @@ contract MainnetIntegration is Test {
             proxy1,
             client
         );
-        P2pSsvProxy(proxy1).setFeeRecipientAddress(client);
+        P2pSsvProxy(payable(proxy1)).setFeeRecipientAddress(client);
         vm.stopPrank();
 
         console.log("test_setFeeRecipientAddress finsihed");
@@ -832,7 +678,7 @@ contract MainnetIntegration is Test {
         uint256 neededEth = p2pSsvProxyFactory.getNeededAmountOfEtherToCoverSsvFees(ssvPayload1.tokenAmount);
 
         address feeDistributor = 0x98b2eFF7e900d741d5c90dab4E708DaEb2a063e1;
-        address proxy1 = p2pSsvProxyFactory.predictP2pSsvProxyAddress(feeDistributor);
+        address proxy1 = p2pSsvProxyFactory.predictP2pSsvProxyAddressBeacon(feeDistributor);
         assertEq(proxy1.code.length, 0);
 
         vm.startPrank(owner);
@@ -928,7 +774,7 @@ contract MainnetIntegration is Test {
             clusterAfterRemoval
         );
 
-        P2pSsvProxy(proxy1).removeValidators(_pubkeys, _operatorIds, _clusters);
+        P2pSsvProxy(payable(proxy1)).removeValidators(_pubkeys, _operatorIds, _clusters);
         vm.stopPrank();
 
         console.log("test_removeValidators finsihed");
@@ -981,7 +827,7 @@ contract MainnetIntegration is Test {
             clusterAfterLiquidation
         );
 
-        P2pSsvProxy(proxy1).liquidate(_operatorIds, _clusters);
+        P2pSsvProxy(payable(proxy1)).liquidate(_operatorIds, _clusters);
         vm.stopPrank();
 
         uint256 ssvTokenBalanceAfter = ssvToken.balanceOf(proxy1);
@@ -991,10 +837,10 @@ contract MainnetIntegration is Test {
         uint256 ssvOwnerTokenBalanceBefore = ssvToken.balanceOf(owner);
 
         vm.expectRevert(abi.encodeWithSelector(OwnableBase__CallerNotOwner.selector, address(this), owner));
-        P2pSsvProxy(proxy1).withdrawSSVTokens(owner, ssvPayload1.tokenAmount);
+        P2pSsvProxy(payable(proxy1)).withdrawSSVTokens(owner, ssvPayload1.tokenAmount);
 
         vm.startPrank(owner);
-        P2pSsvProxy(proxy1).withdrawSSVTokens(owner, ssvPayload1.tokenAmount);
+        P2pSsvProxy(payable(proxy1)).withdrawSSVTokens(owner, ssvPayload1.tokenAmount);
         vm.stopPrank();
 
         uint256 ssvOwnerTokenBalanceAfter = ssvToken.balanceOf(owner);
@@ -1013,7 +859,7 @@ contract MainnetIntegration is Test {
             clusterAfter1stRegistation
         );
 
-        P2pSsvProxy(proxy1).reactivate(ssvPayload1.tokenAmount, _operatorIds, _clusters);
+        P2pSsvProxy(payable(proxy1)).reactivate(ssvPayload1.tokenAmount, _operatorIds, _clusters);
         vm.stopPrank();
 
         _clusters[0] = clusterAfter1stRegistation;
@@ -1032,7 +878,7 @@ contract MainnetIntegration is Test {
             clusterAfterDeposit
         );
 
-        P2pSsvProxy(proxy1).depositToSSV(42 ether, _operatorIds, _clusters);
+        P2pSsvProxy(payable(proxy1)).depositToSSV(42 ether, _operatorIds, _clusters);
 
         console.log("test_liquidateAndReactivate finsihed");
     }
@@ -1067,12 +913,8 @@ contract MainnetIntegration is Test {
 
         uint256 neededEth = p2pSsvProxyFactory.getNeededAmountOfEtherToCoverSsvFees(ssvPayload1.tokenAmount);
 
-        vm.expectRevert(abi.encodeWithSelector(
-            P2pSsvProxyFactory__DuplicateOperatorOwnersNotAllowed.selector,
-            ssvPayload1.ssvOperators[3].owner,
-            ssvPayload1.ssvOperators[3].id,
-            ssvPayload1.ssvOperators[2].id
-        ));
+        // SSV Network rejects duplicate operator IDs.
+        vm.expectRevert(ISSVNetworkCore.OperatorsListNotUnique.selector);
         p2pSsvProxyFactory.registerValidators{value: neededEth}(
             ssvPayload1,
             clientConfig,
@@ -1081,7 +923,7 @@ contract MainnetIntegration is Test {
 
         vm.stopPrank();
 
-        console.log("test_DuplicateOperatorOwner finsihed");
+        console.log("test_DuplicateOperatorOwner finished");
     }
 
     function test_NewClientSelectors() public {
@@ -1191,7 +1033,7 @@ contract MainnetIntegration is Test {
         uint256 tokenAmount = 42;
 
         vm.startPrank(owner);
-        P2pSsvProxy(proxyAddress).withdrawFromSSV(tokenAmount, operatorIds, clusters);
+        P2pSsvProxy(payable(proxyAddress)).withdrawFromSSV(tokenAmount, operatorIds, clusters);
         vm.stopPrank();
 
         uint256 proxyBalanceAfter = ssvToken.balanceOf(proxyAddress);
@@ -1201,7 +1043,7 @@ contract MainnetIntegration is Test {
         uint256 ownerBalanceBefore = ssvToken.balanceOf(owner);
 
         vm.startPrank(owner);
-        P2pSsvProxy(proxyAddress).withdrawSSVTokens(owner, tokenAmount);
+        P2pSsvProxy(payable(proxyAddress)).withdrawSSVTokens(owner, tokenAmount);
         vm.stopPrank();
 
         uint256 ownerBalanceAfter = ssvToken.balanceOf(owner);
@@ -1298,7 +1140,7 @@ contract MainnetIntegration is Test {
             ssvPayload1.ssvValidators[1].pubkey
         );
 
-        P2pSsvProxy(proxy1).bulkExitValidator(_pubkeys, _operatorIds);
+        P2pSsvProxy(payable(proxy1)).bulkExitValidator(_pubkeys, _operatorIds);
         vm.stopPrank();
 
         vm.startPrank(operator);
@@ -1310,7 +1152,7 @@ contract MainnetIntegration is Test {
             ssvPayload1.ssvValidators[1].pubkey
         );
 
-        P2pSsvProxy(proxy1).bulkExitValidator(_pubkeys, _operatorIds);
+        P2pSsvProxy(payable(proxy1)).bulkExitValidator(_pubkeys, _operatorIds);
         vm.stopPrank();
 
         vm.startPrank(client);
@@ -1329,14 +1171,14 @@ contract MainnetIntegration is Test {
             ssvPayload1.ssvValidators[3].pubkey
         );
 
-        P2pSsvProxy(proxy1).bulkExitValidator(_pubkeys, _operatorIds);
+        P2pSsvProxy(payable(proxy1)).bulkExitValidator(_pubkeys, _operatorIds);
         vm.stopPrank();
 
         vm.startPrank(nobody);
 
         vm.expectRevert(abi.encodeWithSelector(P2pSsvProxy__CallerNeitherOperatorNorOwnerNorClient.selector, nobody));
 
-        P2pSsvProxy(proxy1).bulkExitValidator(_pubkeys, _operatorIds);
+        P2pSsvProxy(payable(proxy1)).bulkExitValidator(_pubkeys, _operatorIds);
         vm.stopPrank();
 
         console.log("test_bulkExitValidator finsihed");
@@ -1359,7 +1201,7 @@ contract MainnetIntegration is Test {
         uint256 tokenAmount = 42;
 
         vm.startPrank(owner);
-        P2pSsvProxy(proxyAddress).withdrawFromSSV(tokenAmount, operatorIds, clusters);
+        P2pSsvProxy(payable(proxyAddress)).withdrawFromSSV(tokenAmount, operatorIds, clusters);
         vm.stopPrank();
 
         uint256 proxyBalanceAfter = ssvToken.balanceOf(proxyAddress);
@@ -1370,13 +1212,13 @@ contract MainnetIntegration is Test {
 
         vm.expectRevert(abi.encodeWithSelector(P2pSsvProxy__CallerNeitherOperatorNorOwner.selector, nobody, operator, owner));
 
-        P2pSsvProxy(proxyAddress).withdrawAllSSVTokensToFactory();
+        P2pSsvProxy(payable(proxyAddress)).withdrawAllSSVTokensToFactory();
         vm.stopPrank();
 
         uint256 factoryBalanceBefore = ssvToken.balanceOf(address(p2pSsvProxyFactory));
 
         vm.startPrank(owner);
-        P2pSsvProxy(proxyAddress).withdrawAllSSVTokensToFactory();
+        P2pSsvProxy(payable(proxyAddress)).withdrawAllSSVTokensToFactory();
         vm.stopPrank();
 
         uint256 factoryBalanceAfter = ssvToken.balanceOf(address(p2pSsvProxyFactory));
@@ -1404,13 +1246,13 @@ contract MainnetIntegration is Test {
 
         vm.expectRevert(abi.encodeWithSelector(P2pSsvProxy__CallerNeitherOperatorNorOwner.selector, nobody, operator, owner));
 
-        P2pSsvProxy(proxyAddress).withdrawFromSSVToFactory(tokenAmount, operatorIds, clusters);
+        P2pSsvProxy(payable(proxyAddress)).withdrawFromSSVToFactory(tokenAmount, operatorIds, clusters);
         vm.stopPrank();
 
         uint256 factoryBalanceBefore = ssvToken.balanceOf(address(p2pSsvProxyFactory));
 
         vm.startPrank(operator);
-        P2pSsvProxy(proxyAddress).withdrawFromSSVToFactory(tokenAmount, operatorIds, clusters);
+        P2pSsvProxy(payable(proxyAddress)).withdrawFromSSVToFactory(tokenAmount, operatorIds, clusters);
         vm.stopPrank();
 
         uint256 factoryBalanceAfter = ssvToken.balanceOf(address(p2pSsvProxyFactory));
@@ -1430,7 +1272,7 @@ contract MainnetIntegration is Test {
             clientConfig,
             referrerConfig
         );
-        address proxy_ = p2pSsvProxyFactory.predictP2pSsvProxyAddress(feeDistributorInstance_);
+        address proxy_ = p2pSsvProxyFactory.predictP2pSsvProxyAddressBeacon(feeDistributorInstance_);
 
         for (uint256 i = 0; i < allowedSsvOperatorOwners.length; i++) {
             vm.startPrank(allowedSsvOperatorOwners[i]);
@@ -1455,6 +1297,24 @@ contract MainnetIntegration is Test {
         uint256 amount = 1.6e18;
 
         uint256 neededEth = p2pSsvProxyFactory.getNeededAmountOfEtherToCoverSsvFees(amount);
+
+        vm.deal(nobody, 1000 ether);
+        vm.startPrank(nobody);
+
+        vm.expectRevert(abi.encodeWithSelector(P2pSsvProxyFactory__CallerNeitherOperatorNorOwnerNorClient.selector, nobody));
+        p2pSsvProxyFactory.registerValidators{value: neededEth}(
+            allowedSsvOperatorOwners,
+            operatorIds,
+            pubKeys1,
+            sharesData1,
+            amount,
+            getCluster1(),
+
+            clientConfig,
+            referrerConfig
+        );
+
+        vm.stopPrank();
 
         vm.deal(client, 1000 ether);
         vm.startPrank(client);
@@ -1678,7 +1538,7 @@ contract MainnetIntegration is Test {
         console.log("test_callAnyContract started");
 
         vm.startPrank(owner);
-        P2pSsvProxy p2pSsvProxyInstance = P2pSsvProxy(p2pSsvProxyFactory.createP2pSsvProxy(referenceFeeDistributor));
+        P2pSsvProxy p2pSsvProxyInstance = P2pSsvProxy(payable(p2pSsvProxyFactory.createP2pSsvProxy(referenceFeeDistributor)));
         vm.stopPrank();
 
         deal(address(ssvToken), address(p2pSsvProxyInstance), 50 ether);
