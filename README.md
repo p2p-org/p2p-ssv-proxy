@@ -63,7 +63,7 @@ Steps 1 - 3 can be done using the native tools (like [staking-deposit-cli](https
     - `_referenceFeeDistributor` - address of the template `FeeDistributor` (can be of any type like `ElOnlyFeeDistributor`, `OracleFeeDistributor`, or `ContractWcFeeDistributor`)
     - `_clientConfig` (basis points, client fee recipient address)
     - `_referrerConfig`(basis points, referrer fee recipient address)
-4. Client predicts **`P2pSsvProxy`** instance address by reading `P2pSsvProxyFactory`'s `predictP2pSsvProxyAddress` function, providing it with the `FeeDistributor` instance address from the previous step.
+4. Client predicts **`P2pSsvProxy`** instance address by reading `P2pSsvProxyFactory`'s `predictP2pSsvProxyAddressBeacon` function, providing it with the `FeeDistributor` instance address from the previous step.
 5. Client generates 100 SSV keyshares JSON files choosing operator IDs from Step 5 and cluster owner from Step 7. 
     
     (`P2pSsvProxy` instance address is the cluster owner).
@@ -120,8 +120,8 @@ Steps 1 - 3 can be done using the native tools (like [staking-deposit-cli](https
     
     $tokenAmount = (sum(Operator Fees) + Network Fee) * (Liquidation Threshold Period + Desired Period) * 100$
     
-6. Client calls `P2pSsvProxyFactory`'s `depositEthAndRegisterValidators` function with the data prepared above in batches of 50 validators. (For 100 validators, it’s going to be 2 transactions). The ETH value should be 1600 ETH (32 ETH * 50 validators) in each transaction.
-    - `depositEthAndRegisterValidators` interface
+6. **DEPRECATED:** `depositEthAndRegisterValidators` always reverts. Use `registerValidatorsEth` for ETH-native registration instead. (Previously: Client calls `P2pSsvProxyFactory`'s `depositEthAndRegisterValidators` function with the data prepared above in batches of 50 validators. (For 100 validators, it’s going to be 2 transactions). The ETH value should be 1600 ETH (32 ETH * 50 validators) in each transaction.
+    - (Legacy `depositEthAndRegisterValidators` interface kept for reference only)
         
         ```solidity
         function depositEthAndRegisterValidators(
@@ -190,7 +190,7 @@ All the steps below can happen client-side without any interaction with P2P serv
     - `_referenceFeeDistributor` - address of the template `FeeDistributor` (can be of any type like `ElOnlyFeeDistributor`, `OracleFeeDistributor`, or `ContractWcFeeDistributor`)
     - `_clientConfig` (basis points, client fee recipient address)
     - `_referrerConfig`(basis points, referrer fee recipient address)
-4. Client predicts `**P2pSsvProxy`** instance address by reading `**P2pSsvProxyFactory**`'s `predictP2pSsvProxyAddress` function, providing it with the `FeeDistributor` instance address from the previous step.
+4. Client predicts `**P2pSsvProxy`** instance address by reading `**P2pSsvProxyFactory**`'s `predictP2pSsvProxyAddressBeacon` function, providing it with the `FeeDistributor` instance address from the previous step.
 5. Client generates 100 SSV keyshares JSON files choosing operator IDs from Step 2 and cluster owner from Step 4. 
     
     (`P2pSsvProxy` ****instance address is the cluster owner).
@@ -323,7 +323,7 @@ P2pSsvProxyFactory exists as a single instance for everyone. It is the entry poi
 It stores:
 
 - `referenceFeeDistributor` - a template set by P2P to be used for new `FeeDistributor` instances. Can be changed by P2P at any time. It will only affect the new clusters. Existing clusters will keep their existing `FeeDistributor` instance.
-- `referenceP2pSsvProxy` - a template set by P2P to be used for new `P2pSsvProxy` instances. Can be changed by P2P at any time. It will only affect the new clusters. Existing clusters will keep their existing `P2pSsvProxy` instance.
+- `beacon` - UpgradeableBeacon address for beacon-based proxy deployments. Proxy creation is beacon-only; when unset, proxy creation reverts.
 - `allowedSsvOperatorOwners` - a set of addresses of SSV operator owners (both P2P and partners). Only P2P can add or remove addresses from the set.
 - `allowedSsvOperatorIds` - a mapping of (operator owner address → SSV operator IDs list). The list of allowed SSV operator IDs for each address is limited to 24 IDs. The operator owner can update only their list. P2P can update lists of any owners.
 - `allClientP2pSsvProxies` - a mapping of (client address → a list of addresses of the deployed client `P2pSsvProxy` instances). Updated automatically during `P2pSsvProxy` instance deployment.
@@ -334,20 +334,7 @@ It stores:
 
 P2pSsvProxyFactory’s functions:
 
-- `depositEthAndRegisterValidators` - batch validator registration with ETH deposit. Callable by anyone.
-    - interface
-        
-        ```solidity
-        function depositEthAndRegisterValidators(
-            DepositData calldata _depositData,
-            address _withdrawalCredentialsAddress,
-        
-            SsvPayload calldata _ssvPayload,
-        
-            FeeRecipient calldata _clientConfig,
-            FeeRecipient calldata _referrerConfig
-        ) external payable returns (address p2pSsvProxy);
-        ```
+- `depositEthAndRegisterValidators` - **DEPRECATED.** Always reverts. Use `registerValidatorsEth` for ETH-native registration.
         
 - `registerValidators` - batch validator registration without ETH deposit. Callable by anyone.
     - interface
@@ -360,11 +347,11 @@ P2pSsvProxyFactory’s functions:
         ) external payable returns (address);
         ```
         
-- `predictP2pSsvProxyAddress` - get `P2pSsvProxy` instance address for a given `FeeDistributor` instance address.
+- `predictP2pSsvProxyAddressBeacon` - get `P2pSsvProxy` instance address for a given `FeeDistributor` instance address (beacon-based).
     - interface
         
         ```solidity
-        function predictP2pSsvProxyAddress(
+        function predictP2pSsvProxyAddressBeacon(
             address _feeDistributorInstance
         ) external view returns (address);
         ```
